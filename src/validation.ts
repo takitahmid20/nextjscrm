@@ -9,11 +9,17 @@ import { z } from 'zod';
  * Enterprise validation schema for corporate lead registration
  */
 export const leadSchema = z.object({
-  name: z
+  firstName: z
     .string()
-    .min(2, { message: 'Lead full name must be at least 2 characters.' })
-    .max(50, { message: 'Lead name cannot exceed 50 characters.' })
+    .min(1, { message: 'First name is required.' })
+    .max(30, { message: 'First name cannot exceed 30 characters.' })
     .trim(),
+  lastName: z
+    .string()
+    .min(1, { message: 'Last name is required.' })
+    .max(30, { message: 'Last name cannot exceed 30 characters.' })
+    .trim(),
+  name: z.string().optional(),
   company: z
     .string()
     .min(2, { message: 'Company name must be at least 2 characters.' })
@@ -26,12 +32,19 @@ export const leadSchema = z.object({
   phone: z
     .string()
     .min(5, { message: 'Phone number is too short.' })
-    .max(25, { message: 'Phone number is too long.' })
     .or(z.literal('')),
   status: z.enum(['New', 'Contacted', 'Working', 'Qualified', 'Nurturing', 'Unqualified']),
   source: z.enum(['Website', 'Referral', 'Cold Call', 'Inbound', 'LinkedIn', 'Ad Campaign', 'Partnership']),
   assignedTo: z.string().min(1, { message: 'Please assign a manager/specialist.' }),
   notes: z.string().max(500, { message: 'Notes cannot exceed 500 characters.' }).optional(),
+  companyWebsite: z.string().or(z.literal('')).optional(),
+  facebook: z.string().or(z.literal('')).optional(),
+  emailOptOut: z.boolean().optional(),
+  addressStreet: z.string().optional(),
+  addressCity: z.string().optional(),
+  addressState: z.string().optional(),
+  addressPostalCode: z.string().optional(),
+  addressCountry: z.string().optional(),
 });
 
 export type LeadFormValues = z.infer<typeof leadSchema>;

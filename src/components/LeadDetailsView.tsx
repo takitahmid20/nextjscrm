@@ -20,7 +20,8 @@ import {
   Square,
   Sparkles,
   TrendingUp,
-  Briefcase
+  Briefcase,
+  MapPin
 } from 'lucide-react';
 import { Lead, LeadStatus, LeadSource, CRMTask, Activity } from '../types';
 import { CRM_USERS, formatUSD, formatRelativeTime } from '../utils';
@@ -30,6 +31,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { FormSelect } from './forms/FormControls';
 
 interface LeadDetailsViewProps {
   leadId: string;
@@ -217,22 +219,23 @@ export default function LeadDetailsView({
 
         {/* Dynamic Action Controls for CRM Lead Status */}
         <div className="flex items-center space-x-2">
-          <span className="text-xs text-slate-500 font-medium">Pipeline Status:</span>
-          <select
+          <span className="text-xs text-slate-500 font-medium select-none">Pipeline Status:</span>
+          <FormSelect
             id="lead-detail-status-direct"
             value={lead.status}
-            onChange={(e) => {
-              onUpdateLead(lead.id, { status: e.target.value as LeadStatus });
+            onChange={(val) => {
+              onUpdateLead(lead.id, { status: val as LeadStatus });
             }}
-            className="h-9 px-2.5 bg-white border border-[#E5E7EB] text-xs text-[#111827] font-semibold rounded-[6px] outline-none cursor-pointer focus:border-[#2563EB] shadow-xs"
-          >
-            <option value="New">New</option>
-            <option value="Contacted">Contacted</option>
-            <option value="Working">Working</option>
-            <option value="Qualified">Qualified</option>
-            <option value="Nurturing">Nurturing</option>
-            <option value="Unqualified">Unqualified</option>
-          </select>
+            options={[
+              { value: 'New', label: 'New' },
+              { value: 'Contacted', label: 'Contacted' },
+              { value: 'Working', label: 'Working' },
+              { value: 'Qualified', label: 'Qualified' },
+              { value: 'Nurturing', label: 'Nurturing' },
+              { value: 'Unqualified', label: 'Unqualified' }
+            ]}
+            className="w-36 font-semibold"
+          />
         </div>
       </div>
 
@@ -311,20 +314,70 @@ export default function LeadDetailsView({
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between">
+                {/* Company Website */}
+                {lead.companyWebsite && (
+                  <div className="flex items-center justify-between border-t border-slate-50 pt-2.5">
+                    <span className="text-slate-400 flex items-center gap-1">
+                      <Briefcase className="h-3.5 w-3.5 text-slate-400" />
+                      Website
+                    </span>
+                    <a 
+                      href={lead.companyWebsite.startsWith('http') ? lead.companyWebsite : `https://${lead.companyWebsite}`} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="font-semibold text-[#2563EB] hover:underline truncate max-w-[160px]"
+                    >
+                      {lead.companyWebsite.replace(/https?:\/\//, '')}
+                    </a>
+                  </div>
+                )}
+
+                {/* Facebook profile */}
+                {lead.facebook && (
+                  <div className="flex items-center justify-between border-t border-slate-50 pt-2.5">
+                    <span className="text-slate-400 flex items-center gap-1">
+                      <User className="h-3.5 w-3.5 text-blue-500" />
+                      Facebook
+                    </span>
+                    <a 
+                      href={lead.facebook.startsWith('http') ? lead.facebook : `https://${lead.facebook}`} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="font-semibold text-[#2563EB] hover:underline truncate max-w-[160px]"
+                    >
+                      View Profile
+                    </a>
+                  </div>
+                )}
+
+                {/* Email Opt Out */}
+                <div className="flex items-center justify-between border-t border-slate-50 pt-2.5">
+                  <span className="text-slate-400 flex items-center gap-1">
+                    <Mail className="h-3.5 w-3.5 text-slate-400" />
+                    Marketing Mail
+                  </span>
+                  {lead.emailOptOut ? (
+                    <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
+                      Opted Out
+                    </span>
+                  ) : (
+                    <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                      Subscribed
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between border-t border-slate-50 pt-2.5">
                   <span className="text-slate-400 flex items-center gap-1">
                     <User className="h-3.5 w-3.5" />
                     Assigned Owner
                   </span>
-                  <select
+                  <FormSelect
                     value={lead.assignedTo}
-                    onChange={(e) => onUpdateLead(lead.id, { assignedTo: e.target.value })}
-                    className="bg-transparent text-right font-semibold text-[#111827] outline-none border-b border-transparent hover:border-slate-300 focus:border-[#2563EB]"
-                  >
-                    {CRM_USERS.map(u => (
-                      <option key={u.id} value={u.name}>{u.name}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => onUpdateLead(lead.id, { assignedTo: val })}
+                    options={CRM_USERS.map(u => ({ value: u.name, label: u.name }))}
+                    className="w-36 text-right font-semibold text-[#111827]"
+                  />
                 </div>
               </div>
 
@@ -360,6 +413,66 @@ export default function LeadDetailsView({
                 </div>
               </div>
 
+            </CardContent>
+          </Card>
+
+          {/* Address Information Card */}
+          <Card className="bg-white border border-[#E5E7EB] rounded-[8px] shadow-xs">
+            <CardHeader className="py-4 border-b border-[#F5F6F8]">
+              <CardTitle className="text-xs uppercase font-mono tracking-wider text-slate-500 flex items-center gap-1.5 select-none">
+                <MapPin className="h-4 w-4 text-slate-500" />
+                Address Information
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 space-y-3.5 text-xs">
+              {lead.addressInfo?.street || lead.addressInfo?.city || lead.addressInfo?.state || lead.addressInfo?.postalCode || lead.addressInfo?.country ? (
+                <div className="space-y-3">
+                  {lead.addressInfo.street && (
+                    <div className="flex justify-between items-start gap-2 border-b border-slate-50 pb-2">
+                      <span className="text-slate-400">Street</span>
+                      <span className="font-semibold text-right text-slate-800 break-words max-w-[160px]">
+                        {lead.addressInfo.street}
+                      </span>
+                    </div>
+                  )}
+                  {lead.addressInfo.city && (
+                    <div className="flex justify-between items-center gap-2 border-b border-slate-50 pb-2">
+                      <span className="text-slate-400">City</span>
+                      <span className="font-semibold text-right text-slate-800">
+                        {lead.addressInfo.city}
+                      </span>
+                    </div>
+                  )}
+                  {lead.addressInfo.state && (
+                    <div className="flex justify-between items-center gap-2 border-b border-slate-50 pb-2">
+                      <span className="text-slate-400">State / Province</span>
+                      <span className="font-semibold text-right text-slate-800">
+                        {lead.addressInfo.state}
+                      </span>
+                    </div>
+                  )}
+                  {lead.addressInfo.postalCode && (
+                    <div className="flex justify-between items-center gap-2 border-b border-[#E5E7EB] pb-2">
+                      <span className="text-slate-400">Postal Code</span>
+                      <span className="font-semibold text-right text-slate-800 font-mono">
+                        {lead.addressInfo.postalCode}
+                      </span>
+                    </div>
+                  )}
+                  {lead.addressInfo.country && (
+                    <div className="flex justify-between items-center gap-2">
+                      <span className="text-slate-400">Country</span>
+                      <span className="font-semibold text-right text-[#111827]">
+                        {lead.addressInfo.country}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center text-slate-400 py-3 italic select-none">
+                  No address information loaded for this lead file.
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -507,32 +620,32 @@ export default function LeadDetailsView({
 
                   {/* Priority */}
                   <div className="space-y-1">
-                    <label className="text-[10px] font-medium text-slate-500 uppercase">Booking Priority</label>
-                    <select
+                    <label className="text-[10px] font-medium text-slate-500 uppercase select-none">Booking Priority</label>
+                    <FormSelect
                       value={newFollowupPriority}
-                      onChange={(e) => setNewFollowupPriority(e.target.value as any)}
-                      className="w-full h-9 px-2 bg-white border border-[#E5E7EB] text-xs rounded outline-none"
-                    >
-                      <option value="Low">Low Priority</option>
-                      <option value="Medium">Medium Priority</option>
-                      <option value="High">High Priority</option>
-                    </select>
+                      onChange={(val) => setNewFollowupPriority(val as any)}
+                      options={[
+                        { value: 'Low', label: 'Low Priority' },
+                        { value: 'Medium', label: 'Medium Priority' },
+                        { value: 'High', label: 'High Priority' }
+                      ]}
+                    />
                   </div>
 
                   {/* Category */}
                   <div className="space-y-1">
-                    <label className="text-[10px] font-medium text-slate-500 uppercase">Operational Category</label>
-                    <select
+                    <label className="text-[10px] font-medium text-slate-500 uppercase select-none">Operational Category</label>
+                    <FormSelect
                       value={newFollowupCategory}
-                      onChange={(e) => setNewFollowupCategory(e.target.value as any)}
-                      className="w-full h-9 px-2 bg-white border border-[#E5E7EB] text-xs rounded outline-none"
-                    >
-                      <option value="Follow-up">Follow-up Dialogue</option>
-                      <option value="Meeting">Sync Meeting</option>
-                      <option value="Call">Direct Outbound Call</option>
-                      <option value="Email">Email Communication</option>
-                      <option value="Proposal">Contract Draft Delivery</option>
-                    </select>
+                      onChange={(val) => setNewFollowupCategory(val as any)}
+                      options={[
+                        { value: 'Follow-up', label: 'Follow-up Dialogue' },
+                        { value: 'Meeting', label: 'Sync Meeting' },
+                        { value: 'Call', label: 'Direct Outbound Call' },
+                        { value: 'Email', label: 'Email Communication' },
+                        { value: 'Proposal', label: 'Contract Draft Delivery' }
+                      ]}
+                    />
                   </div>
 
                   {/* Date - Calendar Picker Inside Popover */}

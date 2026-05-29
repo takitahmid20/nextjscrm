@@ -8,6 +8,7 @@ import { Settings, Save, Database, ShieldAlert, Cpu, HeartHandshake, CheckCircle
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FormSelect } from './forms/FormControls';
 
 interface SettingsViewProps {
   onResetData: () => void;
@@ -68,16 +69,17 @@ export default function SettingsView({ onResetData, currentUser, onUpdateCurrent
               </div>
 
               <div>
-                <label className="block font-semibold mb-1.5">Base Operating Currency</label>
-                <select
+                <label className="block font-semibold mb-1.5 select-none">Base Operating Currency</label>
+                <FormSelect
                   value={currencyCode}
-                  onChange={(e) => setCurrencyCode(e.target.value)}
-                  className="w-full h-10 px-2.5 bg-white border border-[#E5E7EB] rounded-[6px]"
-                >
-                  <option value="USD">USD ($) - United States Dollar</option>
-                  <option value="EUR">EUR (€) - European Euro</option>
-                  <option value="GBP">GBP (£) - British Pound Sterling</option>
-                </select>
+                  onChange={(val) => setCurrencyCode(val)}
+                  options={[
+                    { value: 'USD', label: 'USD ($) - United States Dollar' },
+                    { value: 'EUR', label: 'EUR (€) - European Euro' },
+                    { value: 'GBP', label: 'GBP (£) - British Pound Sterling' }
+                  ]}
+                  placeholder="Choose Currency"
+                />
               </div>
             </div>
 

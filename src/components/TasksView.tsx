@@ -204,32 +204,34 @@ export default function TasksView({
 
             {/* Priority Filter */}
             <div className="flex items-center space-x-1.5">
-              <span className="text-[#6B7280] font-sans text-[11px] font-semibold uppercase tracking-wider">Priority:</span>
-              <select
+              <span className="text-[#6B7280] font-sans text-[11px] font-semibold uppercase tracking-wider select-none">Priority:</span>
+              <FormSelect
                 value={priorityFilter}
-                onChange={(e) => setPriorityFilter(e.target.value)}
-                className="h-9 border border-[#E5E7EB] bg-white text-xs px-2 rounded-[4px] outline-none cursor-pointer"
-              >
-                <option value="All">All Levels</option>
-                <option value="High">🔴 High Priority</option>
-                <option value="Medium">🟡 Medium Priority</option>
-                <option value="Low">⚪ Low Priority</option>
-              </select>
+                onChange={(val) => setPriorityFilter(val)}
+                options={[
+                  { value: 'All', label: 'All Levels' },
+                  { value: 'High', label: '🔴 High Priority' },
+                  { value: 'Medium', label: '🟡 Medium Priority' },
+                  { value: 'Low', label: '⚪ Low Priority' }
+                ]}
+                placeholder="All Levels"
+                className="w-32"
+              />
             </div>
 
             {/* Activity Category Filter */}
             <div className="flex items-center space-x-1.5">
-              <span className="text-[#6B7280] font-sans text-[11px] font-semibold uppercase tracking-wider">Category:</span>
-              <select
+              <span className="text-[#6B7280] font-sans text-[11px] font-semibold uppercase tracking-wider select-none">Category:</span>
+              <FormSelect
                 value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-                className="h-9 border border-[#E5E7EB] bg-white text-xs px-2 rounded-[4px] outline-none cursor-pointer"
-              >
-                <option value="All">All Category Actions</option>
-                {categoriesList.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
+                onChange={(val) => setCategoryFilter(val)}
+                options={[
+                  { value: 'All', label: 'All Category Actions' },
+                  ...categoriesList.map(cat => ({ value: cat, label: cat }))
+                ]}
+                placeholder="All Category Actions"
+                className="w-44"
+              />
             </div>
             
             <span className="ml-auto text-xs text-[#6B7280] font-medium hidden sm:inline">

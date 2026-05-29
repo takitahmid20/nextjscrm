@@ -200,35 +200,35 @@ export default function DealsView({
           {/* Quick spreadsheet filter bar */}
           <Card className="bg-white border border-[#E5E7EB] rounded-[8px] p-4 flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-3 text-xs">
             <div className="w-full sm:w-48">
-              <label className="block text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider mb-1">
+              <label className="block text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider mb-1 select-none">
                 Filter Pipeline Stage
               </label>
-              <select
+              <FormSelect
                 value={stageFilter}
-                onChange={(e) => setStageFilter(e.target.value)}
-                className="w-full h-9 px-2 bg-white border border-[#E5E7EB] rounded-[4px]"
-              >
-                <option value="All">All Open Columns</option>
-                {stages.map(st => (
-                  <option key={st} value={st}>{st}</option>
-                ))}
-              </select>
+                onChange={(val) => setStageFilter(val)}
+                options={[
+                  { value: 'All', label: 'All Open Columns' },
+                  ...stages.map(st => ({ value: st, label: st }))
+                ]}
+                placeholder="All Open Columns"
+              />
             </div>
 
             <div className="w-full sm:w-48">
-              <label className="block text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider mb-1">
+              <label className="block text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider mb-1 select-none">
                 Filter Outcome Status
               </label>
-              <select
+              <FormSelect
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full h-9 px-2 bg-white border border-[#E5E7EB] rounded-[4px]"
-              >
-                <option value="All">All statuses (Open/Won/Lost)</option>
-                <option value="Open">Currently Open Funnels</option>
-                <option value="Won">Closed Won Agreements</option>
-                <option value="Lost">Closed Lost / Suspended</option>
-              </select>
+                onChange={(val) => setStatusFilter(val)}
+                options={[
+                  { value: 'All', label: 'All statuses (Open/Won/Lost)' },
+                  { value: 'Open', label: 'Currently Open Funnels' },
+                  { value: 'Won', label: 'Closed Won Agreements' },
+                  { value: 'Lost', label: 'Closed Lost / Suspended' }
+                ]}
+                placeholder="All statuses (Open/Won/Lost)"
+              />
             </div>
 
             <span className="text-[11px] text-[#6B7280] sm:ml-auto">
@@ -593,19 +593,15 @@ export default function DealsView({
 
                   {/* Pipeline Stage adjustment */}
                   <div>
-                    <label className="block text-[#6B7280] font-bold mb-1.5">Funnel Column Stage</label>
-                    <select
+                    <label className="block text-[#6B7280] font-bold mb-1.5 select-none">Funnel Column Stage</label>
+                    <FormSelect
                       value={selectedDeal.stage}
-                      onChange={(e) => {
-                        onUpdateDealStage(selectedDeal.id, e.target.value as DealStage);
-                        setSelectedDeal(prev => prev ? { ...prev, stage: e.target.value as DealStage } : null);
+                      onChange={(val) => {
+                        onUpdateDealStage(selectedDeal.id, val as DealStage);
+                        setSelectedDeal(prev => prev ? { ...prev, stage: val as DealStage } : null);
                       }}
-                      className="w-full h-10 px-2.5 bg-white border border-[#E5E7EB] rounded-[6px]"
-                    >
-                      {stages.map(st => (
-                        <option key={st} value={st}>{st}</option>
-                      ))}
-                    </select>
+                      options={stages.map(st => ({ value: st, label: st }))}
+                    />
                   </div>
 
                   {/* Outcome status triggers */}

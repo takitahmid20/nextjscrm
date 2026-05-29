@@ -18,7 +18,8 @@ import {
   CheckCircle,
   MoreVertical,
   SlidersHorizontal,
-  FolderSync
+  FolderSync,
+  MapPin
 } from 'lucide-react';
 import { Lead, LeadStatus, LeadSource } from '../types';
 import { CRM_USERS, formatUSD, formatRelativeTime, exportLeadsToCSV, parseCSVToLeads } from '../utils';
@@ -30,7 +31,7 @@ import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { leadSchema, LeadFormValues } from '../validation';
-import { FormInput, FormSelect, FormTextarea } from './forms/FormControls';
+import { FormInput, FormSelect, FormTextarea, FormCheckbox } from './forms/FormControls';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 interface LeadsViewProps {
@@ -81,6 +82,8 @@ export default function LeadsView({
   } = useForm<LeadFormValues>({
     resolver: zodResolver(leadSchema),
     defaultValues: {
+      firstName: '',
+      lastName: '',
       name: '',
       company: '',
       email: '',
@@ -89,6 +92,14 @@ export default function LeadsView({
       source: 'Website',
       assignedTo: 'Sarah Jenkins',
       notes: '',
+      companyWebsite: '',
+      facebook: '',
+      emailOptOut: false,
+      addressStreet: '',
+      addressCity: '',
+      addressState: '',
+      addressPostalCode: '',
+      addressCountry: '',
     },
   });
 
@@ -195,9 +206,11 @@ export default function LeadsView({
 
   // Submit new lead form via React Hook Form schema validation
   const handleCreateLeadSubmit = (values: LeadFormValues) => {
-    // Assign a default deal value depending on random seed or set to constant
+    const computedName = `${values.firstName} ${values.lastName}`;
     onAddLead({
-      name: values.name,
+      name: computedName,
+      firstName: values.firstName,
+      lastName: values.lastName,
       company: values.company,
       email: values.email || 'info@' + values.company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com',
       phone: values.phone || '+1 (555) 000-0000',
@@ -205,7 +218,17 @@ export default function LeadsView({
       source: values.source,
       assignedTo: values.assignedTo,
       notes: values.notes,
-      dealValue: Math.floor(Math.random() * 25) * 1000 + 4000 // Standard b2b range
+      dealValue: Math.floor(Math.random() * 25) * 1000 + 4000, // Standard b2b range
+      companyWebsite: values.companyWebsite,
+      facebook: values.facebook,
+      emailOptOut: values.emailOptOut,
+      addressInfo: {
+        street: values.addressStreet,
+        city: values.addressCity,
+        state: values.addressState,
+        postalCode: values.addressPostalCode,
+        country: values.addressCountry,
+      }
     });
 
     // Reset Form & Close
@@ -321,65 +344,62 @@ export default function LeadsView({
 
           {/* Filter Status */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5">
+            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
               Operational Status
             </label>
-            <select
+            <FormSelect
               id="leads-status-filter"
               value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
+              onChange={(val) => {
+                setStatusFilter(val);
                 setCurrentPage(1);
               }}
-              className="w-full h-10 px-3 bg-white border border-[#E5E7EB] text-xs text-[#111827] rounded-[6px] outline-none cursor-pointer focus:border-[#2563EB]"
-            >
-              <option value="All">All Lead Statuses</option>
-              {statusOptions.map(opt => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </select>
+              options={[
+                { value: 'All', label: 'All Lead Statuses' },
+                ...statusOptions.map(opt => ({ value: opt, label: opt }))
+              ]}
+              placeholder="All Lead Statuses"
+            />
           </div>
 
           {/* Filter Lead Source */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5">
+            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
               Acquisition Sourcing
             </label>
-            <select
+            <FormSelect
               id="leads-source-filter"
               value={sourceFilter}
-              onChange={(e) => {
-                setSourceFilter(e.target.value);
+              onChange={(val) => {
+                setSourceFilter(val);
                 setCurrentPage(1);
               }}
-              className="w-full h-10 px-3 bg-white border border-[#E5E7EB] text-xs text-[#111827] rounded-[6px] outline-none cursor-pointer focus:border-[#2563EB]"
-            >
-              <option value="All">All Acquisition Channels</option>
-              {sourceOptions.map(opt => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </select>
+              options={[
+                { value: 'All', label: 'All Sourcing Channels' },
+                ...sourceOptions.map(opt => ({ value: opt, label: opt }))
+              ]}
+              placeholder="All Sourcing Channels"
+            />
           </div>
 
           {/* Filter Assigned Representative */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5">
+            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
               Assigned Representative
             </label>
-            <select
+            <FormSelect
               id="leads-user-filter"
               value={userFilter}
-              onChange={(e) => {
-                setUserFilter(e.target.value);
+              onChange={(val) => {
+                setUserFilter(val);
                 setCurrentPage(1);
               }}
-              className="w-full h-10 px-3 bg-white border border-[#E5E7EB] text-xs text-[#111827] rounded-[6px] outline-none cursor-pointer focus:border-[#2563EB]"
-            >
-              <option value="All">All Sales Reps</option>
-              {CRM_USERS.map(u => (
-                <option key={u.id} value={u.name}>{u.name}</option>
-              ))}
-            </select>
+              options={[
+                { value: 'All', label: 'All Sales Reps' },
+                ...CRM_USERS.map(u => ({ value: u.name, label: u.name }))
+              ]}
+              placeholder="All Sales Reps"
+            />
           </div>
 
         </div>
@@ -398,28 +418,28 @@ export default function LeadsView({
               <span className="text-[#6B7280] text-[11px]">Batch Actions:</span>
               
               {/* Batch assign */}
-              <select
-                onChange={(e) => e.target.value && handleBulkAssign(e.target.value)}
-                defaultValue=""
-                className="bg-white border border-[#E5E7EB] px-2.5 py-1.5 rounded-[4px] text-xs outline-none cursor-pointer text-[#111827]"
-              >
-                <option value="" disabled>Reassign Rep...</option>
-                {CRM_USERS.map(u => (
-                  <option key={u.id} value={u.name}>{u.name}</option>
-                ))}
-              </select>
+              <FormSelect
+                value=""
+                onChange={(val) => val && handleBulkAssign(val)}
+                options={[
+                  { value: '', label: 'Reassign Rep...' },
+                  ...CRM_USERS.map(u => ({ value: u.name, label: u.name }))
+                ]}
+                placeholder="Reassign Rep..."
+                className="w-44"
+              />
 
               {/* Batch status change */}
-              <select
-                onChange={(e) => e.target.value && handleBulkStatusChange(e.target.value as LeadStatus)}
-                defaultValue=""
-                className="bg-white border border-[#E5E7EB] px-2.5 py-1.5 rounded-[4px] text-xs outline-none cursor-pointer text-[#111827]"
-              >
-                <option value="" disabled>Change Status...</option>
-                {statusOptions.map(opt => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
+              <FormSelect
+                value=""
+                onChange={(val) => val && handleBulkStatusChange(val as LeadStatus)}
+                options={[
+                  { value: '', label: 'Change Status...' },
+                  ...statusOptions.map(opt => ({ value: opt, label: opt }))
+                ]}
+                placeholder="Change Status..."
+                className="w-44"
+              />
 
               <Button
                 id="btn-bulk-delete"
@@ -639,19 +659,20 @@ export default function LeadsView({
         <div className="px-5 py-3 border-t border-[#E5E7EB] bg-white flex flex-col sm:flex-row items-center justify-between text-xs text-[#6B7280] space-y-3 sm:space-y-0 select-none">
           <div className="flex items-center space-x-2">
             <span>Rows per page:</span>
-            <select
-              value={rowsPerPage}
-              onChange={(e) => {
-                setRowsPerPage(Number(e.target.value));
+            <FormSelect
+              value={String(rowsPerPage)}
+              onChange={(val) => {
+                setRowsPerPage(Number(val));
                 setCurrentPage(1);
               }}
-              className="border border-[#E5E7EB] rounded-[4px] px-1.5 py-1 bg-white"
-            >
-              <option value="5">5</option>
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-            </select>
+              options={[
+                { value: '5', label: '5' },
+                { value: '10', label: '10' },
+                { value: '25', label: '25' },
+                { value: '50', label: '50' }
+              ]}
+              className="w-16"
+            />
             <span>
               Showing {filteredLeads.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0} - {Math.min(currentPage * rowsPerPage, filteredLeads.length)} of {filteredLeads.length} records
             </span>
@@ -706,19 +727,36 @@ export default function LeadsView({
           <form onSubmit={handleSubmit(handleCreateLeadSubmit)} className="flex-1 overflow-y-auto p-5 space-y-4 crm-scrollbar">
             <div className="grid grid-cols-2 gap-4">
               <FormInput
-                label="Lead full name"
-                register={register('name')}
-                error={errors.name?.message}
+                label="First name"
+                register={register('firstName')}
+                error={errors.firstName?.message}
                 required
-                placeholder="e.g. Robert Downey"
+                placeholder="e.g. Robert"
               />
 
+              <FormInput
+                label="Last name"
+                register={register('lastName')}
+                error={errors.lastName?.message}
+                required
+                placeholder="e.g. Downey"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <FormInput
                 label="Company name"
                 register={register('company')}
                 error={errors.company?.message}
                 required
                 placeholder="e.g. Stark Industries"
+              />
+
+              <FormInput
+                label="Company website"
+                register={register('companyWebsite')}
+                error={errors.companyWebsite?.message}
+                placeholder="e.g. https://apextech.io"
               />
             </div>
 
@@ -737,6 +775,70 @@ export default function LeadsView({
                 error={errors.phone?.message}
                 placeholder="+1 (555) 123-4567"
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 items-center">
+              <FormInput
+                label="Facebook Profile URL"
+                register={register('facebook')}
+                error={errors.facebook?.message}
+                placeholder="e.g. https://facebook.com/robert"
+              />
+
+              <div className="pt-5 select-none">
+                <FormCheckbox
+                  label="Email Opt Out"
+                  register={register('emailOptOut')}
+                  error={errors.emailOptOut?.message}
+                />
+              </div>
+            </div>
+
+            {/* Address Information Section */}
+            <div className="border border-[#E2E8F0] rounded-[8px] p-4 bg-[#F8FAFC]">
+              <h4 className="text-[11px] font-bold text-[#475569] uppercase tracking-wide mb-3 flex items-center select-none">
+                <MapPin className="h-4 w-4 mr-1.5 text-slate-500" />
+                Address Information
+              </h4>
+              
+              <div className="space-y-3">
+                <FormInput
+                  label="Street address"
+                  register={register('addressStreet')}
+                  error={errors.addressStreet?.message}
+                  placeholder="e.g. 10880 Malibu Point"
+                />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <FormInput
+                    label="City"
+                    register={register('addressCity')}
+                    error={errors.addressCity?.message}
+                    placeholder="e.g. Malibu"
+                  />
+                  <FormInput
+                    label="State / Province"
+                    register={register('addressState')}
+                    error={errors.addressState?.message}
+                    placeholder="e.g. California"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <FormInput
+                    label="Postal Code"
+                    register={register('addressPostalCode')}
+                    error={errors.addressPostalCode?.message}
+                    placeholder="e.g. 90265"
+                  />
+                  <FormInput
+                    label="Country"
+                    register={register('addressCountry')}
+                    error={errors.addressCountry?.message}
+                    placeholder="e.g. United States"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-3">

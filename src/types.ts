@@ -9,6 +9,8 @@ export type LeadSource = 'Website' | 'Referral' | 'Cold Call' | 'Inbound' | 'Lin
 export interface Lead {
   id: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   company: string;
   email: string;
   phone: string;
@@ -20,6 +22,16 @@ export interface Lead {
   createdAt: string;
   notes?: string;
   notes_history?: Array<{ id: string; content: string; date: string; author: string }>;
+  companyWebsite?: string;
+  facebook?: string;
+  emailOptOut?: boolean;
+  addressInfo?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+  };
 }
 
 export type DealStage = 'Lead In' | 'Contact Made' | 'Demo Scheduled' | 'Proposal Sent' | 'Negotiation' | 'Won' | 'Lost';
