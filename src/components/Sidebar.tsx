@@ -12,6 +12,7 @@ import { useCRM } from '../context/CRMContext';
 import { 
   LayoutDashboard, 
   Users, 
+  UserCheck,
   Briefcase, 
   CheckSquare, 
   Shield, 
@@ -29,13 +30,15 @@ export default function Sidebar() {
   } = useCRM();
 
   // Determine current active page key
+  const rawTab = pathname.replace(/^\//, '').split('/')[0];
   const currentTab = pathname === '/' || pathname.startsWith('/dashboard') 
     ? 'dashboard' 
-    : pathname.replace(/^\//, '').split('/')[0];
+    : rawTab.startsWith('contact') ? 'contacts' : rawTab.startsWith('lead') ? 'leads' : rawTab;
   
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, href: '/' },
     { id: 'leads', label: 'Leads Directory', icon: Users, href: '/leads' },
+    { id: 'contacts', label: 'Contacts Directory', icon: UserCheck, href: '/contacts' },
     { id: 'deals', label: 'Deals Pipeline', icon: Briefcase, href: '/deals' },
     { id: 'tasks', label: 'Tasks & Activity', icon: CheckSquare, href: '/tasks' },
   ];

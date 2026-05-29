@@ -84,3 +84,33 @@ export interface CRMUser {
   role: string;
   avatarColor: string;
 }
+
+export interface Contact {
+  id: string;
+  name: string;
+  firstName?: string;
+  lastName?: string;
+  company: string;
+  email: string;
+  phone: string;
+  source: LeadSource;
+  assignedTo: string; // User ID or Name
+  lastActivity: string; // ISO date or descriptive string
+  createdAt: string;
+  notes?: string;
+  notes_history?: Array<{ id: string; content: string; date: string; author: string }>;
+  companyWebsite?: string;
+  facebook?: string;
+  emailOptOut?: boolean;
+  addressInfo?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+  };
+  priority?: 'Low' | 'Medium' | 'High';
+  convertedFromLeadId?: string;
+  dealValue?: number;
+}
+

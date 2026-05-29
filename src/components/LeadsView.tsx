@@ -471,56 +471,6 @@ export default function LeadsView({
           </div>
 
         </div>
-
-        {/* Batch Bulk Operations bar - Active ONLY when checkboxes are marked */}
-        {selectedLeadIds.length > 0 && (
-          <div 
-            id="leads-bulk-actions-panel"
-            className="mt-4 p-3 bg-[#EFF6FF] border border-[#2563EB]/25 rounded-[6px] flex flex-col sm:flex-row items-center justify-between text-xs space-y-2 sm:space-y-0"
-          >
-            <span className="font-medium text-[#2563EB]">
-              Selected <strong>{selectedLeadIds.length}</strong> enterprise records
-            </span>
-            
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[#6B7280] text-[11px]">Batch Actions:</span>
-              
-              {/* Batch assign */}
-              <FormSelect
-                value=""
-                onChange={(val) => val && handleBulkAssign(val)}
-                options={[
-                  { value: '', label: 'Reassign Rep...' },
-                  ...CRM_USERS.map(u => ({ value: u.name, label: u.name }))
-                ]}
-                placeholder="Reassign Rep..."
-                className="w-44"
-              />
-
-              {/* Batch status change */}
-              <FormSelect
-                value=""
-                onChange={(val) => val && handleBulkStatusChange(val as LeadStatus)}
-                options={[
-                  { value: '', label: 'Change Status...' },
-                  ...statusOptions.map(opt => ({ value: opt, label: opt }))
-                ]}
-                placeholder="Change Status..."
-                className="w-44"
-              />
-
-              <Button
-                id="btn-bulk-delete"
-                onClick={handleBulkDelete}
-                variant="outline"
-                className="bg-white border border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 font-medium px-3 py-1.5 rounded-[4px] transition-colors flex items-center gap-1 cursor-pointer h-8"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete Selected
-              </Button>
-            </div>
-          </div>
-        )}
       </Card>
 
       {/* Enterprise-grade Leads Table */}
@@ -530,7 +480,7 @@ export default function LeadsView({
             {/* Headers Area */}
             <TableHeader className="bg-[#F5F6F8] font-medium text-[#6B7280] uppercase tracking-wider text-[11px] border-b border-[#E5E7EB]">
               <TableRow>
-                <TableHead className="py-3 px-4 w-12 text-center">
+                <TableHead className="py-3 px-4 w-12 text-center sticky left-0 bg-[#F5F6F8] z-20 border-r border-[#E5E7EB] shadow-[1px_0_0_#CBD5E1]">
                   <input
                     type="checkbox"
                     checked={paginatedLeads.length > 0 && selectedLeadIds.length === paginatedLeads.length}
@@ -540,7 +490,7 @@ export default function LeadsView({
                 </TableHead>
                 
                 <TableHead 
-                  className="py-3 px-4 cursor-pointer hover:bg-gray-100 transition-colors text-xs text-[#6B7280]"
+                  className="py-3 px-4 cursor-pointer hover:bg-gray-105 transition-colors text-xs text-[#6B7280] sticky left-12 bg-[#F5F6F8] z-20 border-r border-slate-200 shadow-[1px_0_0_#CBD5E1] min-w-[200px]"
                   onClick={() => {
                     setSortField('name');
                     setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -586,7 +536,7 @@ export default function LeadsView({
                   </div>
                 </TableHead>
 
-                <TableHead className="py-3 px-4 text-center text-xs text-[#6B7280]">Actions</TableHead>
+                <TableHead className="py-3 px-4 text-center text-xs text-[#6B7280] sticky right-0 bg-[#F5F6F8] z-20 border-l border-slate-200">Actions</TableHead>
               </TableRow>
             </TableHeader>
 
@@ -612,12 +562,12 @@ export default function LeadsView({
                   return (
                     <tr 
                       key={lead.id}
-                      className={`h-[52px] hover:bg-slate-50 transition-colors ${
-                        isChecked ? 'bg-[#EFF6FF]/40' : ''
+                      className={`group h-[52px] transition-colors ${
+                        isChecked ? 'bg-[#EFF6FF]/40' : 'hover:bg-slate-50'
                       }`}
                     >
                       {/* Checkbox column */}
-                      <td className="py-2.5 px-4 text-center">
+                      <td className={`py-2.5 px-4 text-center sticky left-0 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-r border-[#E5E7EB]`}>
                         <input
                           type="checkbox"
                           checked={isChecked}
@@ -627,7 +577,7 @@ export default function LeadsView({
                       </td>
 
                       {/* Lead Name & ID */}
-                      <td className="py-2.5 px-4">
+                      <td className={`py-2.5 px-4 sticky left-12 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-r border-slate-200 min-w-[200px]`}>
                         <div className="flex flex-col">
                           <a 
                             href={`/lead-details?id=${lead.id}`}
@@ -683,7 +633,7 @@ export default function LeadsView({
                       </td>
 
                       {/* Row actions */}
-                      <td className="py-2.5 px-4 text-center">
+                      <td className={`py-2.5 px-4 text-center sticky right-0 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-l border-slate-200`}>
                         <div className="flex items-center justify-center">
                           <Popover>
                             <PopoverTrigger asChild>
@@ -1545,6 +1495,66 @@ export default function LeadsView({
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Floating Viewport Bulk Operations Bar - Compact, elegant, overlayed at bottom */}
+      {selectedLeadIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-xs text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-4.5 z-55 border border-slate-800 text-xs animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="flex items-center gap-2 pr-3 border-r border-slate-800 font-medium whitespace-nowrap select-none">
+            <span className="h-2 w-2 rounded-full bg-[#2563EB] animate-pulse"></span>
+            <span>Selected <strong className="text-blue-400 font-bold">{selectedLeadIds.length}</strong> records</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Direct Select - Reassign Rep */}
+            <select
+              value=""
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val) handleBulkAssign(val);
+              }}
+              className="bg-slate-800 hover:bg-slate-755 border border-slate-700 text-white rounded-[6px] px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer transition-colors max-w-[130px] truncate"
+            >
+              <option value="">Reassign To...</option>
+              {CRM_USERS.map(u => (
+                <option key={u.name} value={u.name}>{u.name}</option>
+              ))}
+            </select>
+
+            {/* Direct Select - Change Status */}
+            <select
+              value=""
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val) handleBulkStatusChange(val as LeadStatus);
+              }}
+              className="bg-slate-800 hover:bg-slate-755 border border-slate-700 text-white rounded-[6px] px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer transition-colors max-w-[130px] truncate"
+            >
+              <option value="">Status...</option>
+              {statusOptions.map(opt => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+
+            {/* Direct Action - Bulk Delete */}
+            <button
+              onClick={handleBulkDelete}
+              className="px-3.5 py-1.5 bg-red-950/70 hover:bg-red-900 border border-red-900 text-red-200 hover:text-white rounded-[6px] font-semibold flex items-center gap-1 transition-all cursor-pointer text-xs"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete Selected
+            </button>
+
+            {/* Unselect All trigger */}
+            <button
+              onClick={() => setSelectedLeadIds([])}
+              className="p-1 rounded-full text-slate-400 hover:bg-slate-800 hover:text-white transition"
+              title="Clear Selections"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );

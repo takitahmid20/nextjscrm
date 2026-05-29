@@ -1,12 +1,13 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Lead, Deal, CRMTask, Activity, DealStage, TaskStatus } from '../types';
-import { getSavedCRMData, saveCRMData, INITIAL_LEADS, INITIAL_DEALS, INITIAL_TASKS, INITIAL_ACTIVITIES } from '../utils';
+import { Lead, Deal, CRMTask, Activity, DealStage, TaskStatus, Contact } from '../types';
+import { getSavedCRMData, saveCRMData, INITIAL_LEADS, INITIAL_DEALS, INITIAL_TASKS, INITIAL_ACTIVITIES, INITIAL_CONTACTS } from '../utils';
 
 interface CRMContextType {
   leads: Lead[];
   deals: Deal[];
+  contacts: Contact[];
   tasks: CRMTask[];
   activities: Activity[];
   currentUser: { name: string; role: string };
@@ -24,6 +25,10 @@ interface CRMContextType {
   updateDealStage: (id: string, stage: DealStage) => void;
   updateDealStatus: (id: string, status: 'Open' | 'Won' | 'Lost') => void;
   deleteDeal: (id: string) => void;
+  addContact: (contact: Omit<Contact, 'id' | 'createdAt' | 'lastActivity'>) => void;
+  updateContact: (id: string, fields: Partial<Contact>) => void;
+  deleteContacts: (ids: string[]) => void;
+  importContacts: (contacts: Partial<Contact>[]) => void;
   addTask: (task: Omit<CRMTask, 'id'>) => void;
   toggleTask: (id: string) => void;
   deleteTask: (id: string) => void;
@@ -36,6 +41,7 @@ const CRMContext = createContext<CRMContextType | undefined>(undefined);
 export function CRMProvider({ children }: { children: React.ReactNode }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [tasks, setTasks] = useState<CRMTask[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [collapsedSidebar, setCollapsedSidebar] = useState<boolean>(false);
@@ -53,14 +59,25 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
     setDeals(data.deals);
     setTasks(data.tasks);
     setActivities(data.activities);
+    setContacts(data.contacts || []);
   }, []);
 
-  const persistChanges = (newLeads: Lead[], newDeals: Deal[], newTasks: CRMTask[], newActivities: Activity[]) => {
+  const persistChanges = (
+    newLeads: Lead[], 
+    newDeals: Deal[], 
+    newTasks: CRMTask[], 
+    newActivities: Activity[],
+    newContacts?: Contact[]
+  ) => {
+    const finalContacts = newContacts !== undefined ? newContacts : contacts;
     setLeads(newLeads);
     setDeals(newDeals);
     setTasks(newTasks);
     setActivities(newActivities);
-    saveCRMData(newLeads, newDeals, newTasks, newActivities);
+    if (newContacts !== undefined) {
+      setContacts(newContacts);
+    }
+    saveCRMData(newLeads, newDeals, newTasks, newActivities, finalContacts);
   };
 
   const addLead = (leadInput: Omit<Lead, 'id' | 'createdAt' | 'lastActivity'>) => {
@@ -259,6 +276,102 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
     persistChanges(leads, updated, tasks, nextActivities);
   };
 
+  const addContact = (contactInput: Omit<Contact, 'id' | 'createdAt' | 'lastActivity'>) => {
+    const freshContact: Contact = {
+      ...contactInput,
+      id: `CON-${Math.floor(500 + Math.random() * 499)}`,
+      createdAt: new Date().toISOString(),
+      lastActivity: new Date().toISOString()
+    };
+    const updated = [freshContact, ...contacts];
+    const description = `Added new unified business Contact: ${freshContact.name} (${freshContact.company}).`;
+    const nextActivities: Activity[] = [
+      {
+        id: `ACT-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'lead_created',
+        user: currentUser.name,
+        description,
+        entityName: freshContact.name
+      },
+      ...activities
+    ];
+    persistChanges(leads, deals, tasks, nextActivities, updated);
+  };
+
+  const updateContact = (id: string, updatedFields: Partial<Contact>) => {
+    const updated = contacts.map(c => {
+      if (c.id === id) {
+        return { ...c, ...updatedFields, lastActivity: new Date().toISOString() };
+      }
+      return c;
+    });
+    const contactObj = contacts.find(c => c.id === id);
+    let nextActivities = [...activities];
+    if (updatedFields.priority && contactObj && contactObj.priority !== updatedFields.priority) {
+      nextActivities = [
+        {
+          id: `ACT-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          type: 'stage_changed',
+          user: currentUser.name,
+          description: `Updated priority of Contact "${contactObj.name}" to ${updatedFields.priority}.`,
+          entityName: contactObj.name
+        },
+        ...nextActivities
+      ];
+    }
+    persistChanges(leads, deals, tasks, nextActivities, updated);
+  };
+
+  const deleteContacts = (ids: string[]) => {
+    const updated = contacts.filter(c => !ids.includes(c.id));
+    const description = `Archived ${ids.length} corporate relationship Contacts.`;
+    const nextActivities: Activity[] = [
+      {
+        id: `ACT-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'lead_created',
+        user: currentUser.name,
+        description
+      },
+      ...activities
+    ];
+    persistChanges(leads, deals, tasks, nextActivities, updated);
+  };
+
+  const importContacts = (newImportedContacts: Partial<Contact>[]) => {
+    const resolved: Contact[] = newImportedContacts.map((part) => ({
+      id: `CON-${Math.floor(500 + Math.random() * 499)}`,
+      name: part.name || 'Imported Contact',
+      firstName: part.firstName || part.name?.split(' ')[0] || 'Imported',
+      lastName: part.lastName || part.name?.split(' ').slice(1).join(' ') || 'Contact',
+      company: part.company || 'Enterprise Corp',
+      email: part.email || 'info@company.com',
+      phone: part.phone || '+1 (555) 000-0000',
+      source: (part.source as any) || 'Inbound',
+      assignedTo: part.assignedTo || currentUser.name,
+      dealValue: part.dealValue || 10000,
+      createdAt: new Date().toISOString(),
+      lastActivity: new Date().toISOString(),
+      notes: 'Acquired through bulk database CSV import.'
+    }));
+
+    const updated = [...resolved, ...contacts];
+    const description = `Executed Bulk CSV deployment. Successfully registered ${resolved.length} business partners.`;
+    const nextActivities: Activity[] = [
+      {
+        id: `ACT-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'lead_created',
+        user: currentUser.name,
+        description
+      },
+      ...activities
+    ];
+    persistChanges(leads, deals, tasks, nextActivities, updated);
+  };
+
   const addTask = (taskInput: Omit<CRMTask, 'id'>) => {
     const freshTask: CRMTask = {
       ...taskInput,
@@ -308,7 +421,8 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
     setDeals(INITIAL_DEALS);
     setTasks(INITIAL_TASKS);
     setActivities(INITIAL_ACTIVITIES);
-    saveCRMData(INITIAL_LEADS, INITIAL_DEALS, INITIAL_TASKS, INITIAL_ACTIVITIES);
+    setContacts(INITIAL_CONTACTS);
+    saveCRMData(INITIAL_LEADS, INITIAL_DEALS, INITIAL_TASKS, INITIAL_ACTIVITIES, INITIAL_CONTACTS);
   };
 
   const updateCurrentUser = (name: string, role: string) => {
@@ -320,6 +434,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
       value={{
         leads,
         deals,
+        contacts,
         tasks,
         activities,
         currentUser,
@@ -337,6 +452,10 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
         updateDealStage,
         updateDealStatus,
         deleteDeal,
+        addContact,
+        updateContact,
+        deleteContacts,
+        importContacts,
         addTask,
         toggleTask,
         deleteTask,

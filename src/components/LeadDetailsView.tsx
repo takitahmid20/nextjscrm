@@ -26,8 +26,9 @@ import {
   Globe,
   Facebook
 } from 'lucide-react';
-import { Lead, LeadStatus, LeadSource, CRMTask, Activity, Deal } from '../types';
+import { Lead, LeadStatus, LeadSource, CRMTask, Activity, Deal, DealStage } from '../types';
 import { CRM_USERS, formatUSD, formatRelativeTime } from '../utils';
+import { useCRM } from '../context/CRMContext';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -124,6 +125,20 @@ export default function LeadDetailsView({
   const [newMeetingPriority, setNewMeetingPriority] = useState<'Low' | 'Medium' | 'High'>('High');
   const [meetingSelectedDate, setMeetingSelectedDate] = useState<Date | undefined>(new Date());
   const [openMeetingDatePicker, setOpenMeetingDatePicker] = useState(false);
+
+  // Convert sheet states
+  const { addContact } = useCRM();
+  const [createDealChecked, setCreateDealChecked] = useState(true);
+  const [convertDealName, setConvertDealName] = useState('');
+  const [convertDealAmount, setConvertDealAmount] = useState(25000);
+  const [convertDealStage, setConvertDealStage] = useState<DealStage>('Lead In');
+
+  React.useEffect(() => {
+    if (lead) {
+      setConvertDealName(`${lead.name} Deal Proposal`);
+      setConvertDealAmount(lead.dealValue || 25000);
+    }
+  }, [lead]);
 
   // Initialize and get timeline notes history
   const rawHistory: Array<{ id: string; content: string; date: string; author: string }> = (lead as any).notes_history || [];
@@ -1415,17 +1430,76 @@ export default function LeadDetailsView({
 
             <div className="space-y-3">
               <p className="text-[#4B5563] leading-relaxed">
-                Converting this lead will automatically qualify the account profile and generate an active CRM business transaction **Deal Opportunity**.
+                Converting this lead will automatically qualify the account profile, transition their record to the unified **Contacts Directory**, and optionally establish a business deal transaction.
               </p>
-              <div className="bg-amber-50 border border-amber-200 p-3 rounded-[6px] text-[11px] text-amber-800 space-y-1">
-                <span className="font-bold">✨ Transition Actions Executed:</span>
-                <ul className="list-disc pl-4 space-y-1">
-                  <li>Pipeline status changes to **Qualified**</li>
-                  <li>A Deal Opportunity valued at $25,000 is opened</li>
-                  <li>Internal history log is fully retained</li>
-                </ul>
-              </div>
             </div>
+
+            {/* Checkbox selector */}
+            <div 
+              className="flex items-center space-x-2.5 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] hover:bg-slate-100/50 transition cursor-pointer select-none"
+              onClick={() => setCreateDealChecked(prev => !prev)}
+            >
+              <input
+                type="checkbox"
+                id="create-deal-checkbox"
+                checked={createDealChecked}
+                onChange={(e) => setCreateDealChecked(e.target.checked)}
+                onClick={(e) => e.stopPropagation()}
+                className="h-4 w-4 text-[#2563EB] border-[#CBD5E1] rounded focus:ring-[#2563EB] cursor-pointer"
+              />
+              <label htmlFor="create-deal-checkbox" className="font-semibold text-slate-700 cursor-pointer flex-1">
+                Create a new Deal for this lead
+              </label>
+            </div>
+
+            {/* Expandable Deal Fields */}
+            {createDealChecked && (
+              <div className="p-4 border border-blue-100 bg-[#EFF6FF]/20 rounded-[6px] space-y-4 animate-in fade-in slide-in-from-top-2 duration-150">
+                <span className="text-[10px] font-bold tracking-wider text-blue-700 uppercase">
+                  Deal Opportunity parameters
+                </span>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-500">Deal Name</label>
+                  <Input
+                    type="text"
+                    value={convertDealName}
+                    onChange={(e) => setConvertDealName(e.target.value)}
+                    className="h-9 text-xs bg-white border-[#CBD5E1] rounded-[6px]"
+                    placeholder="Enter proposal name..."
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-500">Amount ($)</label>
+                  <Input
+                    type="number"
+                    value={convertDealAmount}
+                    onChange={(e) => setConvertDealAmount(Number(e.target.value))}
+                    className="h-9 text-xs bg-white border-[#CBD5E1] rounded-[6px]"
+                    placeholder="25000"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-500">Pipeline Stage</label>
+                  <FormSelect
+                    value={convertDealStage}
+                    onChange={(val) => setConvertDealStage(val as DealStage)}
+                    options={[
+                      { value: 'Lead In', label: 'Lead In' },
+                      { value: 'Contact Made', label: 'Contact Made' },
+                      { value: 'Demo Scheduled', label: 'Demo Scheduled' },
+                      { value: 'Proposal Sent', label: 'Proposal Sent' },
+                      { value: 'Negotiation', label: 'Negotiation' },
+                      { value: 'Won', label: 'Won' },
+                      { value: 'Lost', label: 'Lost' }
+                    ]}
+                    className="w-full text-xs font-semibold bg-white"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="p-4 border-t border-[#E5E7EB] bg-[#F5F6F8] flex items-center justify-end gap-3 font-semibold">
@@ -1439,22 +1513,45 @@ export default function LeadDetailsView({
             <Button
               type="button"
               onClick={() => {
+                // 1. Advance lead stage to Qualified
                 onUpdateLead(lead.id, { status: 'Qualified' as LeadStatus });
                 
-                onAddDeal({
-                  title: `${lead.company} Deal Proposal`,
+                // 2. Register contact
+                addContact({
+                  name: lead.name,
+                  firstName: lead.firstName || lead.name.split(' ')[0],
+                  lastName: lead.lastName || lead.name.split(' ').slice(1).join(' '),
                   company: lead.company,
-                  contactPerson: lead.name,
                   email: lead.email,
                   phone: lead.phone,
-                  value: 25000,
-                  stage: 'Lead In',
-                  status: 'Open',
-                  expectedCloseDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                  assignedTo: lead.assignedTo || 'Sarah Jenkins'
+                  source: lead.source,
+                  assignedTo: lead.assignedTo || 'Sarah Jenkins',
+                  notes: lead.notes || 'Converted from Qualified Lead.',
+                  companyWebsite: (lead as any).companyWebsite || '',
+                  facebook: (lead as any).facebook || '',
+                  emailOptOut: !!(lead as any).emailOptOut,
+                  addressInfo: lead.addressInfo || {},
+                  priority: lead.priority || 'Medium',
+                  convertedFromLeadId: lead.id
                 });
 
-                alert(`Lead profile successfully converted! Check your active CRM Deals directory.`);
+                // 3. Conditionally create active CRM Deal
+                if (createDealChecked) {
+                  onAddDeal({
+                    title: convertDealName || `${lead.company} Deal Proposal`,
+                    company: lead.company,
+                    contactPerson: lead.name,
+                    email: lead.email,
+                    phone: lead.phone,
+                    value: convertDealAmount || 25000,
+                    stage: convertDealStage || 'Lead In',
+                    status: (convertDealStage === 'Won' ? 'Won' : convertDealStage === 'Lost' ? 'Lost' : 'Open') as 'Open' | 'Won' | 'Lost',
+                    expectedCloseDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                    assignedTo: lead.assignedTo || 'Sarah Jenkins'
+                  });
+                }
+
+                alert(`Lead successfully converted to Contact! Checked unified CRM Contacts.`);
                 setShowConvertSheet(false);
               }}
               className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"

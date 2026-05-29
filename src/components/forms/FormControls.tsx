@@ -35,9 +35,11 @@ export const FormInput: React.FC<FormInputProps> = ({
   const fieldId = id || register.name;
   return (
     <div className={cn('flex flex-col space-y-1.5 w-full', className)}>
-      <label htmlFor={fieldId} className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
+      {label && (
+        <label htmlFor={fieldId} className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none whitespace-nowrap truncate">
+          {label} {required && <span className="text-red-500">*</span>}
+        </label>
+      )}
       <input
         id={fieldId}
         type={type}
@@ -140,10 +142,13 @@ export const FormSelect: React.FC<FormSelectProps> = ({
 
   const fieldId = id || (register ? register.name : 'select-field');
 
+  const heightClass = className?.split(' ').find(c => c.startsWith('h-')) || 'h-10';
+  const cleanedClassName = className?.split(' ').filter(c => !c.startsWith('h-')).join(' ');
+
   return (
-    <div className={cn('flex flex-col space-y-1.5 w-full relative', className)} ref={dropdownRef}>
+    <div className={cn('flex flex-col space-y-1.5 w-full relative', cleanedClassName)} ref={dropdownRef}>
       {label && (
-        <label htmlFor={fieldId} className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
+        <label htmlFor={fieldId} className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none whitespace-nowrap truncate">
           {label} {required && <span className="text-red-500">*</span>}
         </label>
       )}
@@ -153,7 +158,8 @@ export const FormSelect: React.FC<FormSelectProps> = ({
         type="button"
         onClick={() => setOpen(!open)}
         className={cn(
-          'h-10 px-3 bg-slate-50 hover:bg-slate-100 border border-[#CBD5E1] rounded-[6px] text-xs text-[#1F2937] font-medium flex items-center justify-between transition-colors w-full cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]',
+          'px-3 bg-slate-50 hover:bg-slate-100 border border-[#CBD5E1] rounded-[6px] text-xs text-[#1F2937] font-medium flex items-center justify-between transition-colors w-full cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]',
+          heightClass,
           error ? 'border-red-500 bg-red-50/10' : ''
         )}
       >
@@ -361,7 +367,7 @@ export const FormDatePicker: React.FC<FormDatePickerProps> = ({
 
   return (
     <div className={cn('flex flex-col space-y-1.5 w-full', className)}>
-      <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
+      <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none whitespace-nowrap truncate">
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       <Popover open={open} onOpenChange={setOpen}>

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Lead, Deal, CRMTask, Activity, CRMUser } from './types';
+import { Lead, Deal, CRMTask, Activity, CRMUser, Contact } from './types';
 
 export const CRM_USERS: CRMUser[] = [
   { id: '1', name: 'Sarah Jenkins', email: 's.jenkins@acme.corp', role: 'Sales Director', avatarColor: 'bg-emerald-600' },
@@ -314,6 +314,48 @@ export const INITIAL_ACTIVITIES: Activity[] = [
   }
 ];
 
+export const INITIAL_CONTACTS: Contact[] = [
+  {
+    id: 'CON-501',
+    name: 'Thomas Miller',
+    company: 'Delta Freight Lines',
+    email: 't.miller@deltafreight.com',
+    phone: '+1 (555) 789-0123',
+    source: 'Referral',
+    assignedTo: 'Sarah Jenkins',
+    lastActivity: '2026-05-25T14:30:00Z',
+    createdAt: '2026-05-01T10:00:00Z',
+    notes: 'Successfully converted from lead. The Fleet Automation Upgrade deal was completed successfully!',
+    dealValue: 65000
+  },
+  {
+    id: 'CON-502',
+    name: 'Helena Carter',
+    company: 'Nova Media Group',
+    email: 'h.carter@novamedia.com',
+    phone: '+1 (555) 890-1234',
+    source: 'Website',
+    assignedTo: 'David Vance',
+    lastActivity: '2026-05-20T11:00:00Z',
+    createdAt: '2026-04-20T11:00:00Z',
+    notes: 'Converted client. Main point of contact for Nova Media enterprise profile.',
+    dealValue: 9200
+  }
+];
+
+function safeParse<T>(key: string, fallback: T): T {
+  try {
+    const item = localStorage.getItem(key);
+    if (!item || item === 'undefined' || item === 'null') {
+      return fallback;
+    }
+    return JSON.parse(item);
+  } catch (e) {
+    console.error(`Error parsing localStorage key "${key}":`, e);
+    return fallback;
+  }
+}
+
 // Localstorage state management helpers
 export function getSavedCRMData() {
   if (typeof window === 'undefined') {
@@ -322,27 +364,28 @@ export function getSavedCRMData() {
       deals: INITIAL_DEALS,
       tasks: INITIAL_TASKS,
       activities: INITIAL_ACTIVITIES,
+      contacts: INITIAL_CONTACTS,
     };
   }
-  const leads = localStorage.getItem('crm_leads');
-  const deals = localStorage.getItem('crm_deals');
-  const tasks = localStorage.getItem('crm_tasks');
-  const activities = localStorage.getItem('crm_activities');
 
   return {
-    leads: leads ? JSON.parse(leads) : INITIAL_LEADS,
-    deals: deals ? JSON.parse(deals) : INITIAL_DEALS,
-    tasks: tasks ? JSON.parse(tasks) : INITIAL_TASKS,
-    activities: activities ? JSON.parse(activities) : INITIAL_ACTIVITIES,
+    leads: safeParse('crm_leads', INITIAL_LEADS),
+    deals: safeParse('crm_deals', INITIAL_DEALS),
+    tasks: safeParse('crm_tasks', INITIAL_TASKS),
+    activities: safeParse('crm_activities', INITIAL_ACTIVITIES),
+    contacts: safeParse('crm_contacts', INITIAL_CONTACTS),
   };
 }
 
-export function saveCRMData(leads: Lead[], deals: Deal[], tasks: CRMTask[], activities: Activity[]) {
+export function saveCRMData(leads: Lead[], deals: Deal[], tasks: CRMTask[], activities: Activity[], contacts?: Contact[]) {
   if (typeof window === 'undefined') return;
   localStorage.setItem('crm_leads', JSON.stringify(leads));
   localStorage.setItem('crm_deals', JSON.stringify(deals));
   localStorage.setItem('crm_tasks', JSON.stringify(tasks));
   localStorage.setItem('crm_activities', JSON.stringify(activities));
+  if (contacts !== undefined) {
+    localStorage.setItem('crm_contacts', JSON.stringify(contacts));
+  }
 }
 
 export function formatUSD(value: number): string {
@@ -427,6 +470,74 @@ export function parseCSVToLeads(csvText: string): Partial<Lead>[] {
       else if (header.toLowerCase().includes('value')) obj.dealValue = Number(val) || 0;
       else if (header.toLowerCase().includes('status')) obj.status = val;
       else if (header.toLowerCase().includes('source')) obj.source = val;
+      else if (header.toLowerCase().includes('assigned')) obj.assignedTo = val;
+    });
+
+    if (obj.name && obj.company) {
+      results.push(obj);
+    }
+  }
+
+  return results;
+}
+
+// Simple export CSV simulation for Contacts
+export function exportContactsToCSV(contacts: Contact[]): string {
+  const headers = ['ID', 'Contact Name', 'Company', 'Email', 'Phone', 'Source', 'Priority', 'Deal Value ($)', 'Assigned User', 'Created At'];
+  const rows = contacts.map(c => [
+    c.id,
+    `"${c.name.replace(/"/g, '""')}"`,
+    `"${c.company.replace(/"/g, '""')}"`,
+    c.email || '',
+    c.phone || '',
+    c.source,
+    c.priority || 'Medium',
+    c.dealValue || 0,
+    `"${(c.assignedTo || '').replace(/"/g, '""')}"`,
+    c.createdAt
+  ]);
+  
+  return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+}
+
+// Simple parse CSV parser for Contacts
+export function parseCSVToContacts(csvText: string): Partial<Contact>[] {
+  const lines = csvText.split('\n').filter(line => line.trim().length > 0);
+  if (lines.length <= 1) return [];
+  
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
+  const results: Partial<Contact>[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    const line = lines[i];
+
+    for (let j = 0; j < line.length; j++) {
+      const char = line[j];
+      if (char === '"' || char === "'") {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        values.push(current.trim().replace(/^["']|["']$/g, ''));
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    values.push(current.trim().replace(/^["']|["']$/g, ''));
+
+    const obj: any = {};
+    headers.forEach((header, index) => {
+      const val = values[index];
+      if (!val) return;
+      if (header.toLowerCase().includes('name')) obj.name = val;
+      else if (header.toLowerCase().includes('company')) obj.company = val;
+      else if (header.toLowerCase().includes('email')) obj.email = val;
+      else if (header.toLowerCase().includes('phone')) obj.phone = val;
+      else if (header.toLowerCase().includes('source')) obj.source = val;
+      else if (header.toLowerCase().includes('priority')) obj.priority = val;
+      else if (header.toLowerCase().includes('val')) obj.dealValue = Number(val) || 0;
       else if (header.toLowerCase().includes('assigned')) obj.assignedTo = val;
     });
 
