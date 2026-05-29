@@ -66,8 +66,9 @@ export default function LeadsView({
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
   // Row actions modals / sub-sheets
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
   const [activeActionLead, setActiveActionLead] = useState<Lead | null>(null);
-  const [activeActionType, setActiveActionType] = useState<'notes' | 'followup' | 'meeting' | 'assignee' | 'email' | 'edit' | null>(null);
+  const [activeActionType, setActiveActionType] = useState<'notes' | 'followup' | 'meeting' | 'assignee' | 'email' | null>(null);
 
   // Row action forms values
   const [noteContent, setNoteContent] = useState('');
@@ -80,16 +81,7 @@ export default function LeadsView({
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
 
-  // Local state for editing individual fields inside Edit action
-  const [editFirstName, setEditFirstName] = useState('');
-  const [editLastName, setEditLastName] = useState('');
-  const [editCompany, setEditCompany] = useState('');
-  const [editEmail, setEditEmail] = useState('');
-  const [editPhone, setEditPhone] = useState('');
-  const [editStatus, setEditStatus] = useState<LeadStatus>('New');
-  const [editSource, setEditSource] = useState<LeadSource>('Website');
-  const [editPriority, setEditPriority] = useState<'Low' | 'Medium' | 'High'>('Medium');
-  const [editAssignedTo, setEditAssignedTo] = useState('Sarah Jenkins');
+
 
   // Sorting
   const [sortField, setSortField] = useState<'name' | 'company' | 'dealValue' | 'createdAt'>('createdAt');
@@ -244,7 +236,7 @@ export default function LeadsView({
   // Submit new lead form via React Hook Form schema validation
   const handleCreateLeadSubmit = (values: LeadFormValues) => {
     const computedName = `${values.firstName} ${values.lastName}`;
-    onAddLead({
+    const payload = {
       name: computedName,
       firstName: values.firstName,
       lastName: values.lastName,
@@ -255,7 +247,6 @@ export default function LeadsView({
       source: values.source,
       assignedTo: values.assignedTo,
       notes: values.notes,
-      dealValue: Math.floor(Math.random() * 25) * 1000 + 4000, // Standard b2b range
       companyWebsite: values.companyWebsite,
       facebook: values.facebook,
       emailOptOut: values.emailOptOut,
@@ -267,10 +258,25 @@ export default function LeadsView({
         country: values.addressCountry,
       },
       priority: values.priority || 'Medium',
-    });
+    };
+
+    if (editingLeadId) {
+      onUpdateLead(editingLeadId, {
+        ...payload,
+        lastActivity: `Lead details updated via unified form`
+      });
+      alert(`Lead details for "${computedName}" updated successfully.`);
+    } else {
+      onAddLead({
+        ...payload,
+        dealValue: Math.floor(Math.random() * 25) * 1000 + 4000, // Standard b2b range
+      });
+      alert(`New lead "${computedName}" created successfully.`);
+    }
 
     // Reset Form & Close
     reset();
+    setEditingLeadId(null);
     setShowAddModal(false);
   };
 
@@ -349,7 +355,31 @@ export default function LeadsView({
 
           <Button
             id="btn-create-lead-modal"
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              setEditingLeadId(null);
+              reset({
+                firstName: '',
+                lastName: '',
+                name: '',
+                company: '',
+                email: '',
+                phone: '',
+                status: 'New',
+                source: 'Website',
+                assignedTo: 'Sarah Jenkins',
+                notes: '',
+                companyWebsite: '',
+                facebook: '',
+                emailOptOut: false,
+                addressStreet: '',
+                addressCity: '',
+                addressState: '',
+                addressPostalCode: '',
+                addressCountry: '',
+                priority: 'Medium',
+              });
+              setShowAddModal(true);
+            }}
             className="h-10 px-4 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-[13px] font-medium rounded-[6px] transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
           >
             <Plus className="h-4.5 w-4.5" />
@@ -738,17 +768,29 @@ export default function LeadsView({
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setActiveActionLead(lead);
-                                    setActiveActionType('edit');
-                                    setEditFirstName(lead.firstName || lead.name.split(' ')[0] || '');
-                                    setEditLastName(lead.lastName || lead.name.split(' ').slice(1).join(' ') || '');
-                                    setEditCompany(lead.company);
-                                    setEditEmail(lead.email);
-                                    setEditPhone(lead.phone);
-                                    setEditStatus(lead.status);
-                                    setEditSource(lead.source);
-                                    setEditPriority(lead.priority || 'Medium');
-                                    setEditAssignedTo(lead.assignedTo);
+                                    setEditingLeadId(lead.id);
+                                    reset({
+                                      firstName: lead.firstName || lead.name.split(' ')[0] || '',
+                                      lastName: lead.lastName || lead.name.split(' ').slice(1).join(' ') || '',
+                                      name: lead.name,
+                                      company: lead.company,
+                                      email: lead.email,
+                                      phone: lead.phone,
+                                      status: lead.status,
+                                      source: lead.source,
+                                      assignedTo: lead.assignedTo,
+                                      notes: lead.notes || '',
+                                      companyWebsite: lead.companyWebsite || '',
+                                      facebook: lead.facebook || '',
+                                      emailOptOut: lead.emailOptOut || false,
+                                      addressStreet: lead.addressInfo?.street || '',
+                                      addressCity: lead.addressInfo?.city || '',
+                                      addressState: lead.addressInfo?.state || '',
+                                      addressPostalCode: lead.addressInfo?.postalCode || '',
+                                      addressCountry: lead.addressInfo?.country || '',
+                                      priority: lead.priority || 'Medium',
+                                    });
+                                    setShowAddModal(true);
                                   }}
                                   className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
                                 >
@@ -862,7 +904,9 @@ export default function LeadsView({
       <Sheet open={showAddModal} onOpenChange={setShowAddModal}>
         <SheetContent side="right" className="w-full sm:max-w-2xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full">
           <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F5F6F8]">
-            <SheetTitle className="font-semibold text-[#111827] text-[15px]">Create Lead Account Record</SheetTitle>
+            <SheetTitle className="font-semibold text-[#111827] text-[15px]">
+              {editingLeadId ? 'Update Lead Account Record' : 'Create Lead Account Record'}
+            </SheetTitle>
           </SheetHeader>
 
           {/* Form */}
@@ -1032,6 +1076,7 @@ export default function LeadsView({
                 variant="outline"
                 onClick={() => {
                   reset();
+                  setEditingLeadId(null);
                   setShowAddModal(false);
                 }}
                 className="h-9 px-4 border border-[#E5E7EB] text-xs text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
@@ -1043,7 +1088,7 @@ export default function LeadsView({
                 type="submit"
                 className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
               >
-                Create account
+                {editingLeadId ? 'Update account' : 'Create account'}
               </Button>
             </div>
           </form>
@@ -1213,7 +1258,6 @@ export default function LeadsView({
                     {activeActionType === 'meeting' && 'Set Corporate Briefing Meeting'}
                     {activeActionType === 'assignee' && 'Reassign Account Representative'}
                     {activeActionType === 'email' && 'Dispatch Corporate Email Message'}
-                    {activeActionType === 'edit' && 'Edit Customer Profile'}
                   </SheetTitle>
                   <p className="text-[10px] text-[#6B7280] font-mono mt-0.5">
                     Lead: {activeActionLead.name} ({activeActionLead.company})
@@ -1482,170 +1526,7 @@ export default function LeadsView({
                   </div>
                 )}
 
-                {/* 6. EDIT LEAD ACTION FORM */}
-                {activeActionType === 'edit' && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                          First Name
-                        </label>
-                        <Input
-                          type="text"
-                          value={editFirstName}
-                          onChange={(e) => setEditFirstName(e.target.value)}
-                          className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                          Last Name
-                        </label>
-                        <Input
-                          type="text"
-                          value={editLastName}
-                          onChange={(e) => setEditLastName(e.target.value)}
-                          className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1"
-                        />
-                      </div>
-                    </div>
 
-                    <div>
-                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                        Company Name
-                      </label>
-                      <Input
-                        type="text"
-                        value={editCompany}
-                        onChange={(e) => setEditCompany(e.target.value)}
-                        className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                          Email Address
-                        </label>
-                        <Input
-                          type="email"
-                          value={editEmail}
-                          onChange={(e) => setEditEmail(e.target.value)}
-                          className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                          Phone Number
-                        </label>
-                        <Input
-                          type="text"
-                          value={editPhone}
-                          onChange={(e) => setEditPhone(e.target.value)}
-                          className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                          Lead Status
-                        </label>
-                        <select
-                          value={editStatus}
-                          onChange={(e) => setEditStatus(e.target.value as any)}
-                          className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
-                        >
-                          <option value="New">New</option>
-                          <option value="Contacted">Contacted</option>
-                          <option value="Working">Working</option>
-                          <option value="Qualified">Qualified</option>
-                          <option value="Nurturing">Nurturing</option>
-                          <option value="Unqualified">Unqualified</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                          Source Sourcing
-                        </label>
-                        <select
-                          value={editSource}
-                          onChange={(e) => setEditSource(e.target.value as any)}
-                          className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
-                        >
-                          <option value="Website">Website</option>
-                          <option value="Referral">Referral</option>
-                          <option value="Cold Call">Cold Call</option>
-                          <option value="Inbound">Inbound</option>
-                          <option value="LinkedIn">LinkedIn</option>
-                          <option value="Ad Campaign">Ad Campaign</option>
-                          <option value="Partnership">Partnership</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                          Account Handler
-                        </label>
-                        <select
-                          value={editAssignedTo}
-                          onChange={(e) => setEditAssignedTo(e.target.value)}
-                          className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
-                        >
-                          {CRM_USERS.map(u => (
-                            <option key={u.name} value={u.name}>{u.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                          Risk Priority
-                        </label>
-                        <select
-                          value={editPriority}
-                          onChange={(e) => setEditPriority(e.target.value as any)}
-                          className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
-                        >
-                          <option value="Low">Low</option>
-                          <option value="Medium">Medium</option>
-                          <option value="High">High</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        if (!editFirstName || !editLastName || !editCompany) {
-                          alert('First Name, Last Name and Company are required.');
-                          return;
-                        }
-                        onUpdateLead(activeActionLead.id, {
-                          firstName: editFirstName,
-                          lastName: editLastName,
-                          name: `${editFirstName} ${editLastName}`,
-                          company: editCompany,
-                          email: editEmail,
-                          phone: editPhone,
-                          status: editStatus,
-                          source: editSource,
-                          priority: editPriority,
-                          assignedTo: editAssignedTo,
-                          lastActivity: `Customer updated profile settings via action menu`
-                        });
-                        alert(`Account Profile for "${editFirstName} ${editLastName}" updated.`);
-                        setActiveActionLead(null);
-                        setActiveActionType(null);
-                      }}
-                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
-                    >
-                      Update Lead Profile
-                    </Button>
-                  </div>
-                )}
               </div>
 
               <div className="p-3 border-t border-[#E5E7EB] bg-[#F5F6F8] flex justify-end">

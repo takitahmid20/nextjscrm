@@ -79,7 +79,7 @@ export default function LeadDetailsView({
   }
 
   // Local state for edits & new inputs
-  const [activeTab, setActiveTab] = useState<'notes' | 'tasks'>('notes');
+  const [activeTab, setActiveTab] = useState<'notes' | 'followup' | 'meeting'>('notes');
   const [showEditSheet, setShowEditSheet] = useState(false);
   const [showConvertSheet, setShowConvertSheet] = useState(false);
   const [showEmailSheet, setShowEmailSheet] = useState(false);
@@ -101,6 +101,8 @@ export default function LeadDetailsView({
   const [editState, setEditState] = useState(lead.addressInfo?.state || '');
   const [editPostalCode, setEditPostalCode] = useState(lead.addressInfo?.postalCode || '');
   const [editCountry, setEditCountry] = useState(lead.addressInfo?.country || '');
+  const [editAssignedTo, setEditAssignedTo] = useState(lead.assignedTo || 'Sarah Jenkins');
+  const [editNotes, setEditNotes] = useState(lead.notes || '');
 
   // Send Email states
   const [emailSubject, setEmailSubject] = useState(`Introductory Briefing regarding ${lead.company}`);
@@ -116,6 +118,12 @@ export default function LeadDetailsView({
   const [newFollowupCategory, setNewFollowupCategory] = useState<'Call' | 'Email' | 'Meeting' | 'Proposal' | 'Follow-up'>('Follow-up');
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [openDatePicker, setOpenDatePicker] = useState(false);
+
+  // Meeting form states
+  const [newMeetingTitle, setNewMeetingTitle] = useState('');
+  const [newMeetingPriority, setNewMeetingPriority] = useState<'Low' | 'Medium' | 'High'>('High');
+  const [meetingSelectedDate, setMeetingSelectedDate] = useState<Date | undefined>(new Date());
+  const [openMeetingDatePicker, setOpenMeetingDatePicker] = useState(false);
 
   // Initialize and get timeline notes history
   const rawHistory: Array<{ id: string; content: string; date: string; author: string }> = (lead as any).notes_history || [];
@@ -295,6 +303,8 @@ export default function LeadDetailsView({
               setEditState(lead.addressInfo?.state || '');
               setEditPostalCode(lead.addressInfo?.postalCode || '');
               setEditCountry(lead.addressInfo?.country || '');
+              setEditAssignedTo(lead.assignedTo || 'Sarah Jenkins');
+              setEditNotes(lead.notes || '');
               setShowEditSheet(true);
             }}
             className="h-9 px-3.5 border border-[#D1D5DB] text-xs font-semibold text-[#374151] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer flex items-center gap-1.5"
@@ -598,14 +608,25 @@ export default function LeadDetailsView({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('tasks')}
+                  onClick={() => setActiveTab('followup')}
                   className={`px-4 py-2 font-semibold text-xs tracking-wide transition-all border-b-2 -mb-[1px] select-none cursor-pointer ${
-                    activeTab === 'tasks'
+                    activeTab === 'followup'
                       ? 'border-[#2563EB] text-[#2563EB] bg-white rounded-t-md font-bold'
                       : 'border-transparent text-slate-500 hover:text-slate-855'
                   }`}
                 >
-                  Schedule Tasks, Follow-ups, and Meetings
+                  Follow-ups
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('meeting')}
+                  className={`px-4 py-2 font-semibold text-xs tracking-wide transition-all border-b-2 -mb-[1px] select-none cursor-pointer ${
+                    activeTab === 'meeting'
+                      ? 'border-[#2563EB] text-[#2563EB] bg-white rounded-t-md font-bold'
+                      : 'border-transparent text-slate-500 hover:text-slate-855'
+                  }`}
+                >
+                  Meetings
                 </button>
               </div>
             </CardHeader>
@@ -709,16 +730,16 @@ export default function LeadDetailsView({
                 </div>
               )}
 
-              {activeTab === 'tasks' && (
+              {activeTab === 'followup' && (
                 <div className="space-y-5">
                   {/* Add Followup scheduling component */}
                   <form onSubmit={handleAddFollowupSubmit} className="space-y-4 bg-slate-50 p-4 border border-[#E5E7EB] rounded-lg">
-                    <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Schedule New Routine Task or Meeting</h3>
+                    <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Schedule New Routine Follow-up Task</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                       
                       {/* Title */}
                       <div className="space-y-1">
-                        <label className="text-[10px] font-medium text-slate-500 uppercase">Task Title / Agenda</label>
+                        <label className="text-[10px] font-medium text-slate-500 uppercase">Follow-up Title / Agenda</label>
                         <Input
                           type="text"
                           placeholder="e.g. Present RFP feedback"
@@ -750,7 +771,6 @@ export default function LeadDetailsView({
                           onChange={(val) => setNewFollowupCategory(val as any)}
                           options={[
                             { value: 'Follow-up', label: 'Follow-up Dialogue' },
-                            { value: 'Meeting', label: 'Sync Meeting' },
                             { value: 'Call', label: 'Direct Outbound Call' },
                             { value: 'Email', label: 'Email Communication' },
                             { value: 'Proposal', label: 'Contract Draft Delivery' }
@@ -796,19 +816,19 @@ export default function LeadDetailsView({
                         disabled={!newFollowupTitle.trim()}
                         className="h-8.5 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded cursor-pointer transition-colors"
                       >
-                        Schedule Action Item
+                        Schedule Follow-up
                       </Button>
                     </div>
                   </form>
 
                   {/* Scheduled Agenda Items Checklist */}
                   <div className="space-y-3">
-                    <h3 className="text-xs font-bold text-slate-700 uppercase tracking-widest">Active Scheduled Agenda</h3>
-                    {relatedTasks.length === 0 ? (
+                    <h3 className="text-xs font-bold text-slate-700 uppercase tracking-widest">Active Follow-ups Checklist</h3>
+                    {relatedTasks.filter(t => t.category !== 'Meeting').length === 0 ? (
                       <p className="text-xs text-slate-500 bg-slate-50 p-3.5 rounded text-center italic">No pending follow-ups scheduled for this executive profile.</p>
                     ) : (
                       <div className="divide-y divide-slate-100 border border-[#E5E7EB] rounded bg-white overflow-hidden text-xs">
-                        {relatedTasks.map((t) => (
+                        {relatedTasks.filter(t => t.category !== 'Meeting').map((t) => (
                           <div 
                             key={t.id} 
                             className={`flex justify-between items-center p-3 transition-colors ${
@@ -854,7 +874,172 @@ export default function LeadDetailsView({
                             <button
                               type="button"
                               onClick={() => {
-                                if (confirm(`Do you wish to delete task: "${t.title}"?`)) {
+                                if (confirm(`Do you wish to delete follow-up: "${t.title}"?`)) {
+                                  onDeleteTask(t.id);
+                                }
+                              }}
+                              className="p-1 hover:bg-slate-100 text-stone-400 hover:text-red-500 rounded cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'meeting' && (
+                <div className="space-y-5">
+                  {/* Add Meeting scheduling component */}
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!newMeetingTitle.trim()) return;
+                      const formattedDate = meetingSelectedDate ? meetingSelectedDate.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+                      onAddTask({
+                        title: newMeetingTitle,
+                        dueDate: formattedDate,
+                        priority: newMeetingPriority,
+                        status: 'Pending',
+                        assignedTo: lead.assignedTo || 'Sarah Jenkins',
+                        category: 'Meeting',
+                        relatedToType: 'Lead',
+                        relatedToName: lead.name
+                      });
+                      setNewMeetingTitle('');
+                      setNewMeetingPriority('High');
+                      alert(`Scheduled meeting booked under "${formattedDate}".`);
+                    }} 
+                    className="space-y-4 bg-slate-50 p-4 border border-[#E5E7EB] rounded-lg"
+                  >
+                    <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Schedule New Sync Meeting</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      
+                      {/* Title */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-medium text-slate-500 uppercase">Meeting Subject / Agenda</label>
+                        <Input
+                          type="text"
+                          placeholder="e.g. Discuss Q3 roadmap"
+                          value={newMeetingTitle}
+                          onChange={(e) => setNewMeetingTitle(e.target.value)}
+                          className="h-9 text-xs bg-white border border-[#E5E7EB] pb-1.5 pt-1.5"
+                        />
+                      </div>
+
+                      {/* Priority */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-medium text-slate-500 uppercase select-none">Meeting Priority</label>
+                        <FormSelect
+                          value={newMeetingPriority}
+                          onChange={(val) => setNewMeetingPriority(val as any)}
+                          options={[
+                            { value: 'Low', label: 'Low Priority' },
+                            { value: 'Medium', label: 'Medium Priority' },
+                            { value: 'High', label: 'High Priority' }
+                          ]}
+                        />
+                      </div>
+
+                      {/* Date - Calendar Picker Inside Popover */}
+                      <div className="space-y-1 flex flex-col">
+                        <label className="text-[10px] font-medium text-slate-500 uppercase">Meeting Date Selector</label>
+                        <Popover open={openMeetingDatePicker} onOpenChange={setOpenMeetingDatePicker}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              id="meeting-date-picker-trigger"
+                              variant="outline"
+                              type="button"
+                              className="h-9 px-3 bg-white border border-[#E5E7EB] text-xs hover:bg-[#F3F4F6] text-slate-700 flex justify-between items-center text-left w-full rounded"
+                            >
+                              <span className="truncate">
+                                {meetingSelectedDate ? meetingSelectedDate.toLocaleDateString() : 'Choose Date'}
+                              </span>
+                              <CalendarIcon className="h-4 w-4 ml-1 text-[#6B7280]" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0 bg-white shadow-lg border border-[#E5E7EB] z-50">
+                            <Calendar
+                              mode="single"
+                              selected={meetingSelectedDate}
+                              onSelect={(date) => {
+                                setMeetingSelectedDate(date);
+                                setOpenMeetingDatePicker(false);
+                              }}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <Button
+                        type="submit"
+                        disabled={!newMeetingTitle.trim()}
+                        className="h-8.5 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded cursor-pointer transition-colors"
+                      >
+                        Schedule Meeting
+                      </Button>
+                    </div>
+                  </form>
+
+                  {/* Scheduled Agenda Items Checklist */}
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold text-slate-700 uppercase tracking-widest">Active Meetings Scheduled</h3>
+                    {relatedTasks.filter(t => t.category === 'Meeting').length === 0 ? (
+                      <p className="text-xs text-slate-500 bg-slate-50 p-3.5 rounded text-center italic">No upcoming sync meetings booked for this entity profile.</p>
+                    ) : (
+                      <div className="divide-y divide-slate-100 border border-[#E5E7EB] rounded bg-white overflow-hidden text-xs">
+                        {relatedTasks.filter(t => t.category === 'Meeting').map((t) => (
+                          <div 
+                            key={t.id} 
+                            className={`flex justify-between items-center p-3 transition-colors ${
+                              t.status === 'Completed' ? 'bg-slate-50/50' : 'bg-white'
+                            }`}
+                          >
+                            <div className="flex items-center space-x-3.5">
+                              {/* Checked Checkbox vs Unchecked */}
+                              <button
+                                type="button"
+                                onClick={() => onToggleTask(t.id)}
+                                className="text-slate-500 hover:text-[#2563EB] transition-colors cursor-pointer"
+                                title={t.status === 'Completed' ? 'Mark Meeting Done' : 'Mark Meeting Pending'}
+                              >
+                                {t.status === 'Completed' ? (
+                                  <CheckSquare className="h-4.5 w-4.5 text-emerald-600 font-bold" />
+                                ) : (
+                                  <Square className="h-4.5 w-4.5 text-slate-400" />
+                                )}
+                              </button>
+                              
+                              <div>
+                                <span className={`font-semibold text-slate-800 ${t.status === 'Completed' ? 'line-through text-slate-400' : ''}`}>
+                                  {t.title}
+                                </span>
+                                <div className="flex items-center space-x-2.5 text-[10px] text-slate-400 mt-1 font-mono">
+                                  <span className="bg-slate-100 text-slate-600 px-1 rounded uppercase tracking-wider">{t.category}</span>
+                                  <span className="flex items-center gap-0.5">
+                                    <CalendarIcon className="h-3 w-3" />
+                                    {t.dueDate}
+                                  </span>
+                                  <span>•</span>
+                                  <span className={`font-semibold ${
+                                    t.priority === 'High' ? 'text-red-500' : t.priority === 'Medium' ? 'text-amber-500' : 'text-blue-500'
+                                  }`}>
+                                    {t.priority}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* PURGE BUTTON */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (confirm(`Do you wish to delete meeting: "${t.title}"?`)) {
                                   onDeleteTask(t.id);
                                 }
                               }}
@@ -884,229 +1069,271 @@ export default function LeadDetailsView({
         <SheetContent side="right" className="w-full sm:max-w-xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-50">
           <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] bg-[#F5F6F8]">
             <SheetTitle className="font-semibold text-[#111827] text-[15px]">
-              Edit Customer Profile
+              Edit Customer Profile Settings
             </SheetTitle>
             <p className="text-[10px] text-[#6B7280] font-mono mt-0.5">
-              Ref: {lead.id}
+              Ref ID / Identifier: {lead.id}
             </p>
           </SheetHeader>
 
-          <div className="flex-1 overflow-y-auto p-5 space-y-4 crm-scrollbar text-xs">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                  First Name
+          <div className="flex-1 overflow-y-auto p-5 space-y-5 crm-scrollbar text-xs">
+            {/* 1. Name section */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col space-y-1.5 w-full">
+                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
+                  First name <span className="text-red-500">*</span>
                 </label>
-                <Input 
-                  type="text" 
-                  value={editFirstName} 
-                  onChange={(e) => setEditFirstName(e.target.value)} 
-                  className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                <input
+                  type="text"
+                  value={editFirstName}
+                  onChange={(e) => setEditFirstName(e.target.value)}
+                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                  placeholder="e.g. Robert"
                 />
               </div>
-              <div>
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                  Last Name
+
+              <div className="flex flex-col space-y-1.5 w-full">
+                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
+                  Last name <span className="text-red-500">*</span>
                 </label>
-                <Input 
-                  type="text" 
-                  value={editLastName} 
-                  onChange={(e) => setEditLastName(e.target.value)} 
-                  className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                <input
+                  type="text"
+                  value={editLastName}
+                  onChange={(e) => setEditLastName(e.target.value)}
+                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                  placeholder="e.g. Downey"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                Company Name
-              </label>
-              <Input 
-                type="text" 
-                value={editCompany} 
-                onChange={(e) => setEditCompany(e.target.value)} 
-                className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                  Company Website
+            {/* 2. Company section */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col space-y-1.5 w-full">
+                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
+                  Company Name <span className="text-red-500">*</span>
                 </label>
-                <Input 
-                  type="text" 
-                  value={editWebsite} 
-                  onChange={(e) => setEditWebsite(e.target.value)} 
-                  placeholder="https://example.com" 
-                  className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                <input
+                  type="text"
+                  value={editCompany}
+                  onChange={(e) => setEditCompany(e.target.value)}
+                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                  placeholder="e.g. Stark Industries"
                 />
               </div>
-              <div>
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                  Facebook Link
+
+              <div className="flex flex-col space-y-1.5 w-full">
+                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
+                  Company Website URL
                 </label>
-                <Input 
-                  type="text" 
-                  value={editFacebook} 
-                  onChange={(e) => setEditFacebook(e.target.value)} 
-                  placeholder="https://facebook.com/handle" 
-                  className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                <input
+                  type="text"
+                  value={editWebsite}
+                  onChange={(e) => setEditWebsite(e.target.value)}
+                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                  placeholder="e.g. starkindustries.com"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+            {/* 3. Communication section */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col space-y-1.5 w-full">
+                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
                   Email Address
                 </label>
-                <Input 
-                  type="email" 
-                  value={editEmail} 
-                  onChange={(e) => setEditEmail(e.target.value)} 
-                  className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                <input
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                  placeholder="robert@stark.com"
                 />
               </div>
-              <div>
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+
+              <div className="flex flex-col space-y-1.5 w-full">
+                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
                   Phone Number
                 </label>
-                <Input 
-                  type="text" 
-                  value={editPhone} 
-                  onChange={(e) => setEditPhone(e.target.value)} 
-                  className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                <input
+                  type="text"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                  placeholder="e.g. +1 (555) 019-2834"
                 />
               </div>
             </div>
 
-            <div className="flex items-center space-x-2 bg-slate-50 p-2.5 border border-slate-200 rounded-[6px]">
-              <input 
-                type="checkbox" 
-                id="edit-email-opt-out-checkbox-de"
-                checked={editEmailOptOut} 
-                onChange={(e) => setEditEmailOptOut(e.target.checked)} 
-                className="rounded border-[#E5E7EB] text-[#2563EB] focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer"
-              />
-              <label htmlFor="edit-email-opt-out-checkbox-de" className="text-[11px] font-medium text-slate-700 select-none cursor-pointer">
-                Opt-out from marketing emails
-              </label>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                  Lead Status
+            {/* 4. Social Integration Profile & Email settings */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col space-y-1.5 w-full">
+                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
+                  Facebook Profile URL
                 </label>
-                <select 
-                  value={editStatus} 
-                  onChange={(e) => setEditStatus(e.target.value as any)} 
-                  className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
-                >
-                  <option value="New">New</option>
-                  <option value="Contacted">Contacted</option>
-                  <option value="Working">Working</option>
-                  <option value="Qualified">Qualified</option>
-                  <option value="Nurturing">Nurturing</option>
-                  <option value="Unqualified">Unqualified</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                  Source
-                </label>
-                <select 
-                  value={editSource} 
-                  onChange={(e) => setEditSource(e.target.value as any)} 
-                  className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
-                >
-                  <option value="Website">Website</option>
-                  <option value="Referral">Referral</option>
-                  <option value="Cold Call">Cold Call</option>
-                  <option value="Inbound">Inbound</option>
-                  <option value="LinkedIn">LinkedIn</option>
-                  <option value="Ad Campaign">Ad Campaign</option>
-                  <option value="Partnership">Partnership</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                  Priority
-                </label>
-                <select 
-                  value={editPriority} 
-                  onChange={(e) => setEditPriority(e.target.value as any)} 
-                  className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
-                >
-                  <option value="Low">Low</option>
-                  <option value="Medium">Medium</option>
-                  <option value="High">High</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="border-t border-[#E5E7EB] pt-3.5 space-y-3">
-              <h3 className="text-[11.5px] font-bold text-slate-700 uppercase tracking-wider">Address Information</h3>
-              <div>
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
-                  Street
-                </label>
-                <Input 
-                  type="text" 
-                  value={editStreet} 
-                  onChange={(e) => setEditStreet(e.target.value)} 
-                  className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                <input
+                  type="text"
+                  value={editFacebook}
+                  onChange={(e) => setEditFacebook(e.target.value)}
+                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                  placeholder="https://facebook.com/username"
                 />
               </div>
+
+              <div className="flex flex-col justify-end pb-1">
+                <div className="flex items-center space-x-2.5 bg-slate-50 border border-slate-200 rounded-[6px] px-3 h-10">
+                  <input
+                    type="checkbox"
+                    id="edit-email-opt-out-cb-details"
+                    checked={editEmailOptOut}
+                    onChange={(e) => setEditEmailOptOut(e.target.checked)}
+                    className="rounded border-[#E5E7EB] text-[#2563EB] focus:ring-blue-500 h-4 w-4 cursor-pointer"
+                  />
+                  <label htmlFor="edit-email-opt-out-cb-details" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
+                    Opt-out Marketing
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* 5. Address Details subsection */}
+            <div className="border border-slate-100 rounded-lg p-3.5 space-y-3 bg-[#F8FAFC]">
+              <h3 className="text-xs font-bold text-slate-600 uppercase tracking-widest flex items-center gap-1">
+                <MapPin className="h-3.5 w-3.5 text-slate-500" />
+                Address Geography Location
+              </h3>
+              
+              <div className="flex flex-col space-y-1.5 w-full">
+                <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wider select-none">
+                  Street Address
+                </label>
+                <input
+                  type="text"
+                  value={editStreet}
+                  onChange={(e) => setEditStreet(e.target.value)}
+                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                  placeholder="e.g. 10880 Malibu Point"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                <div className="flex flex-col space-y-1.5 w-full">
+                  <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wider select-none">
                     City
                   </label>
-                  <Input 
-                    type="text" 
-                    value={editCity} 
-                    onChange={(e) => setEditCity(e.target.value)} 
-                    className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                  <input
+                    type="text"
+                    value={editCity}
+                    onChange={(e) => setEditCity(e.target.value)}
+                    className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                    placeholder="e.g. Malibu"
                   />
                 </div>
-                <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+
+                <div className="flex flex-col space-y-1.5 w-full">
+                  <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wider select-none">
                     State / Province
                   </label>
-                  <Input 
-                    type="text" 
-                    value={editState} 
-                    onChange={(e) => setEditState(e.target.value)} 
-                    className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                  <input
+                    type="text"
+                    value={editState}
+                    onChange={(e) => setEditState(e.target.value)}
+                    className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                    placeholder="e.g. CA"
                   />
                 </div>
               </div>
+
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                <div className="flex flex-col space-y-1.5 w-full">
+                  <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wider select-none">
                     Postal Code
                   </label>
-                  <Input 
-                    type="text" 
-                    value={editPostalCode} 
-                    onChange={(e) => setEditPostalCode(e.target.value)} 
-                    className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                  <input
+                    type="text"
+                    value={editPostalCode}
+                    onChange={(e) => setEditPostalCode(e.target.value)}
+                    className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                    placeholder="e.g. 90265"
                   />
                 </div>
-                <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+
+                <div className="flex flex-col space-y-1.5 w-full">
+                  <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wider select-none">
                     Country
                   </label>
-                  <Input 
-                    type="text" 
-                    value={editCountry} 
-                    onChange={(e) => setEditCountry(e.target.value)} 
-                    className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1" 
+                  <input
+                    type="text"
+                    value={editCountry}
+                    onChange={(e) => setEditCountry(e.target.value)}
+                    className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                    placeholder="e.g. United States"
                   />
                 </div>
               </div>
+            </div>
+
+            {/* 6. Classification options using FormSelect */}
+            <div className="grid grid-cols-4 gap-3">
+              <FormSelect
+                label="Status"
+                value={editStatus}
+                onChange={(val) => setEditStatus(val as LeadStatus)}
+                options={[
+                  { value: 'New', label: 'New' },
+                  { value: 'Contacted', label: 'Contacted' },
+                  { value: 'Working', label: 'Working' },
+                  { value: 'Qualified', label: 'Qualified' },
+                  { value: 'Nurturing', label: 'Nurturing' },
+                  { value: 'Unqualified', label: 'Unqualified' }
+                ]}
+              />
+
+              <FormSelect
+                label="Source Channel"
+                value={editSource}
+                onChange={(val) => setEditSource(val as LeadSource)}
+                options={[
+                  { value: 'Website', label: 'Website' },
+                  { value: 'Referral', label: 'Referral' },
+                  { value: 'Cold Call', label: 'Cold Call' },
+                  { value: 'Inbound', label: 'Inbound' },
+                  { value: 'LinkedIn', label: 'LinkedIn' },
+                  { value: 'Ad Campaign', label: 'Ad Campaign' },
+                  { value: 'Partnership', label: 'Partnership' }
+                ]}
+              />
+
+              <FormSelect
+                label="Account Handler"
+                value={editAssignedTo}
+                onChange={(val) => setEditAssignedTo(val)}
+                options={CRM_USERS.map(u => ({ value: u.name, label: u.name }))}
+              />
+
+              <FormSelect
+                label="Priority"
+                value={editPriority}
+                onChange={(val) => setEditPriority(val as any)}
+                options={[
+                  { value: 'Low', label: 'Low' },
+                  { value: 'Medium', label: 'Medium' },
+                  { value: 'High', label: 'High' }
+                ]}
+              />
+            </div>
+
+            {/* 7. Internal Notes section */}
+            <div className="flex flex-col space-y-1.5 w-full">
+              <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
+                Internal notes & activity brief
+              </label>
+              <textarea
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                className="px-3 py-2 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] min-h-[82px]"
+                placeholder="Insert any relevant context from calls, introductions..."
+                rows={3}
+              />
             </div>
           </div>
 
@@ -1116,7 +1343,7 @@ export default function LeadDetailsView({
               onClick={() => setShowEditSheet(false)}
               className="h-9 px-4 border border-[#E5E7EB] text-xs text-[#374151] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
             >
-              Close
+              Cancel
             </Button>
             <Button
               type="button"
@@ -1138,6 +1365,8 @@ export default function LeadDetailsView({
                   companyWebsite: editWebsite,
                   facebook: editFacebook,
                   emailOptOut: editEmailOptOut,
+                  assignedTo: editAssignedTo,
+                  notes: editNotes,
                   addressInfo: {
                     street: editStreet,
                     city: editCity,
