@@ -30,7 +30,7 @@ import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { dealSchema, DealFormValues } from '../validation';
-import { FormInput, FormSelect } from './forms/FormControls';
+import { FormInput, FormSelect, FormDatePicker } from './forms/FormControls';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 interface DealsViewProps {
@@ -62,6 +62,8 @@ export default function DealsView({
     register,
     handleSubmit,
     reset,
+    setValue,
+    watch,
     formState: { errors },
   } = useForm<DealFormValues>({
     resolver: zodResolver(dealSchema) as any,
@@ -515,11 +517,12 @@ export default function DealsView({
                 options={stages.map(st => ({ value: st, label: st }))}
               />
               
-              <FormInput
+              <FormDatePicker
                 label="Expected Close Date"
-                register={register('expectedCloseDate')}
+                registerName="expectedCloseDate"
+                setValue={setValue}
+                value={watch('expectedCloseDate')}
                 error={errors.expectedCloseDate?.message}
-                type="date"
               />
 
               <FormSelect

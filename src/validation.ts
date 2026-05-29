@@ -45,6 +45,7 @@ export const leadSchema = z.object({
   addressState: z.string().optional(),
   addressPostalCode: z.string().optional(),
   addressCountry: z.string().optional(),
+  priority: z.enum(['Low', 'Medium', 'High']).optional(),
 });
 
 export type LeadFormValues = z.infer<typeof leadSchema>;

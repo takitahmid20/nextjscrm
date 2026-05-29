@@ -19,7 +19,13 @@ import {
   MoreVertical,
   SlidersHorizontal,
   FolderSync,
-  MapPin
+  MapPin,
+  MessageSquare,
+  CalendarDays,
+  UserCog,
+  Edit2,
+  Mail,
+  MoreHorizontal
 } from 'lucide-react';
 import { Lead, LeadStatus, LeadSource } from '../types';
 import { CRM_USERS, formatUSD, formatRelativeTime, exportLeadsToCSV, parseCSVToLeads } from '../utils';
@@ -31,8 +37,10 @@ import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { leadSchema, LeadFormValues } from '../validation';
-import { FormInput, FormSelect, FormTextarea, FormCheckbox } from './forms/FormControls';
+import { FormInput, FormSelect, FormTextarea, FormCheckbox, FormDatePicker } from './forms/FormControls';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useCRM } from '../context/CRMContext';
 
 interface LeadsViewProps {
   leads: Lead[];
@@ -51,9 +59,37 @@ export default function LeadsView({
   onImportLeads,
   globalSearch 
 }: LeadsViewProps) {
+  const { addTask, currentUser } = useCRM();
+
   // Navigation & Page sizes
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  // Row actions modals / sub-sheets
+  const [activeActionLead, setActiveActionLead] = useState<Lead | null>(null);
+  const [activeActionType, setActiveActionType] = useState<'notes' | 'followup' | 'meeting' | 'assignee' | 'email' | 'edit' | null>(null);
+
+  // Row action forms values
+  const [noteContent, setNoteContent] = useState('');
+  const [followupTitle, setFollowupTitle] = useState('');
+  const [followupDate, setFollowupDate] = useState('2026-06-01');
+  const [followupPriority, setFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('Medium');
+  const [meetingTitle, setMeetingTitle] = useState('');
+  const [meetingDate, setMeetingDate] = useState('2026-06-01');
+  const [selectedAssignee, setSelectedAssignee] = useState('');
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+
+  // Local state for editing individual fields inside Edit action
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [editCompany, setEditCompany] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editStatus, setEditStatus] = useState<LeadStatus>('New');
+  const [editSource, setEditSource] = useState<LeadSource>('Website');
+  const [editPriority, setEditPriority] = useState<'Low' | 'Medium' | 'High'>('Medium');
+  const [editAssignedTo, setEditAssignedTo] = useState('Sarah Jenkins');
 
   // Sorting
   const [sortField, setSortField] = useState<'name' | 'company' | 'dealValue' | 'createdAt'>('createdAt');
@@ -100,6 +136,7 @@ export default function LeadsView({
       addressState: '',
       addressPostalCode: '',
       addressCountry: '',
+      priority: 'Medium',
     },
   });
 
@@ -228,7 +265,8 @@ export default function LeadsView({
         state: values.addressState,
         postalCode: values.addressPostalCode,
         country: values.addressCountry,
-      }
+      },
+      priority: values.priority || 'Medium',
     });
 
     // Reset Form & Close
@@ -616,35 +654,139 @@ export default function LeadsView({
 
                       {/* Row actions */}
                       <td className="py-2.5 px-4 text-center">
-                        <div className="flex items-center justify-center space-x-2">
-                          <a
-                            id={`btn-view-lead-${lead.id}`}
-                            href={`/lead-details?id=${lead.id}`}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              window.history.pushState({ tab: 'lead-details' }, '', `/lead-details?id=${lead.id}`);
-                              const popstateEvent = new PopStateEvent('popstate');
-                              window.dispatchEvent(popstateEvent);
-                            }}
-                            className="p-1 hover:bg-[#EFF6FF] rounded text-[#6B7280] hover:text-[#2563EB] transition-colors cursor-pointer"
-                            title="Review full operational records"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </a>
-                          
-                          {/* Quick promote trigger */}
-                          <button
-                            id={`btn-working-lead-${lead.id}`}
-                            onClick={() => {
-                              onUpdateLead(lead.id, { status: 'Working', lastActivity: new Date().toISOString() });
-                              alert(`Lead ${lead.name} marked as Working.`);
-                            }}
-                            className="p-1 hover:bg-[#EFF6FF] rounded text-[#6B7280] hover:text-[#2563EB] transition-colors text-[10px] font-medium"
-                            title="Set working status"
-                            disabled={lead.status === 'Working'}
-                          >
-                            Working
-                          </button>
+                        <div className="flex items-center justify-center">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                id={`leads-popover-trigger-${lead.id}`}
+                                variant="ghost"
+                                className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full flex items-center justify-center cursor-pointer"
+                              >
+                                <MoreVertical className="h-4.5 w-4.5 text-slate-500" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-48 p-1 bg-white border border-[#E5E7EB] shadow-lg rounded-md z-40" align="end">
+                              <div className="flex flex-col text-xs font-medium">
+                                <a
+                                  href={`/lead-details?id=${lead.id}`}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    window.history.pushState({ tab: 'lead-details' }, '', `/lead-details?id=${lead.id}`);
+                                    window.dispatchEvent(new PopStateEvent('popstate'));
+                                  }}
+                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700"
+                                >
+                                  <Eye className="h-3.5 w-3.5 text-blue-500" />
+                                  <span>View Details</span>
+                                </a>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveActionLead(lead);
+                                    setActiveActionType('notes');
+                                    setNoteContent('');
+                                  }}
+                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                                >
+                                  <MessageSquare className="h-3.5 w-3.5 text-indigo-500" />
+                                  <span>Add Note</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveActionLead(lead);
+                                    setActiveActionType('followup');
+                                    setFollowupTitle(`Follow-up with ${lead.name}`);
+                                    setFollowupDate(new Date().toISOString().slice(0, 10));
+                                    setFollowupPriority('Medium');
+                                  }}
+                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                                >
+                                  <CalendarDays className="h-3.5 w-3.5 text-amber-500" />
+                                  <span>Followups</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveActionLead(lead);
+                                    setActiveActionType('meeting');
+                                    setMeetingTitle(`Meeting with ${lead.name}`);
+                                    setMeetingDate(new Date().toISOString().slice(0, 10));
+                                  }}
+                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                                >
+                                  <CalendarDays className="h-3.5 w-3.5 text-green-500" />
+                                  <span>Set Meeting</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveActionLead(lead);
+                                    setActiveActionType('assignee');
+                                    setSelectedAssignee(lead.assignedTo);
+                                  }}
+                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                                >
+                                  <UserCog className="h-3.5 w-3.5 text-cyan-500" />
+                                  <span>Change Assignee</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveActionLead(lead);
+                                    setActiveActionType('edit');
+                                    setEditFirstName(lead.firstName || lead.name.split(' ')[0] || '');
+                                    setEditLastName(lead.lastName || lead.name.split(' ').slice(1).join(' ') || '');
+                                    setEditCompany(lead.company);
+                                    setEditEmail(lead.email);
+                                    setEditPhone(lead.phone);
+                                    setEditStatus(lead.status);
+                                    setEditSource(lead.source);
+                                    setEditPriority(lead.priority || 'Medium');
+                                    setEditAssignedTo(lead.assignedTo);
+                                  }}
+                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                                >
+                                  <Edit2 className="h-3.5 w-3.5 text-purple-500" />
+                                  <span>Edit Lead</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveActionLead(lead);
+                                    setActiveActionType('email');
+                                    setEmailSubject(`Followup: Core CRM context for ${lead.company}`);
+                                    setEmailBody(`Hi ${lead.name},\n\nI wanted to reach out regarding our solution proposal...\n\nBest regards,\n${currentUser?.name || 'Sarah Jenkins'}`);
+                                  }}
+                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                                >
+                                  <Mail className="h-3.5 w-3.5 text-sky-500" />
+                                  <span>Send Email</span>
+                                </button>
+
+                                <div className="border-t border-slate-100 my-1"></div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirm(`Are you sure you want to delete lead ${lead.name}?`)) {
+                                      onDeleteLeads([lead.id]);
+                                    }
+                                  }}
+                                  className="w-full text-left px-3 py-2 hover:bg-red-50 text-red-600 transition-colors rounded flex items-center gap-2 cursor-pointer"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                                  <span>Delete Lead</span>
+                                </button>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
                         </div>
                       </td>
                     </tr>
@@ -841,7 +983,7 @@ export default function LeadsView({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-4 gap-3">
               <FormSelect
                 label="Status"
                 register={register('status')}
@@ -861,6 +1003,17 @@ export default function LeadsView({
                 register={register('assignedTo')}
                 error={errors.assignedTo?.message}
                 options={CRM_USERS.map(u => ({ value: u.name, label: u.name }))}
+              />
+
+              <FormSelect
+                label="Priority"
+                register={register('priority')}
+                error={errors.priority?.message}
+                options={[
+                  { value: 'High', label: 'High' },
+                  { value: 'Medium', label: 'Medium' },
+                  { value: 'Low', label: 'Low' },
+                ]}
               />
             </div>
 
@@ -1041,6 +1194,471 @@ export default function LeadsView({
                   </Button>
                 </div>
 
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* SIDE PANEL: INDIVIDUAL ROW ACTION SYSTEM */}
+      <Sheet open={!!activeActionLead && !!activeActionType} onOpenChange={(open) => { if (!open) { setActiveActionLead(null); setActiveActionType(null); } }}>
+        <SheetContent side="right" className="w-full sm:max-w-xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-50">
+          {activeActionLead && activeActionType && (
+            <>
+              <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F5F6F8]">
+                <div>
+                  <SheetTitle className="font-semibold text-[#111827] text-[15px] capitalize">
+                    {activeActionType === 'notes' && 'Add Corporate Log Note'}
+                    {activeActionType === 'followup' && 'Schedule Customer Followup'}
+                    {activeActionType === 'meeting' && 'Set Corporate Briefing Meeting'}
+                    {activeActionType === 'assignee' && 'Reassign Account Representative'}
+                    {activeActionType === 'email' && 'Dispatch Corporate Email Message'}
+                    {activeActionType === 'edit' && 'Edit Customer Profile'}
+                  </SheetTitle>
+                  <p className="text-[10px] text-[#6B7280] font-mono mt-0.5">
+                    Lead: {activeActionLead.name} ({activeActionLead.company})
+                  </p>
+                </div>
+              </SheetHeader>
+
+              <div className="flex-1 overflow-y-auto p-5 space-y-4 crm-scrollbar text-xs">
+                {/* 1. NOTES ACTION FORM */}
+                {activeActionType === 'notes' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none text-[11.5px]">
+                        Note Content Text
+                      </label>
+                      <textarea
+                        rows={6}
+                        value={noteContent}
+                        onChange={(e) => setNoteContent(e.target.value)}
+                        placeholder="Type standard enterprise call brief or feedback comments..."
+                        className="w-full p-3 font-sans text-xs border border-[#E5E7EB] rounded-[6px] outline-none focus:border-[#2563EB] bg-[#F5F6F8] crm-scrollbar"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        if (!noteContent) {
+                          alert('Note content is required.');
+                          return;
+                        }
+                        const rawHistory = activeActionLead.notes_history || [];
+                        const newNote = {
+                          id: `NOTE-${Date.now()}`,
+                          content: noteContent,
+                          date: new Date().toISOString().slice(0, 10),
+                          author: currentUser?.name || 'Sarah Jenkins'
+                        };
+                        onUpdateLead(activeActionLead.id, {
+                          notes_history: [...rawHistory, newNote],
+                          notes: noteContent
+                        });
+                        alert(`Note added successfully to ${activeActionLead.name}.`);
+                        setActiveActionLead(null);
+                        setActiveActionType(null);
+                      }}
+                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                    >
+                      Save CRM Log Note
+                    </Button>
+                  </div>
+                )}
+
+                {/* 2. FOLLOWUP ACTION FORM */}
+                {activeActionType === 'followup' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                        Followup Task Title
+                      </label>
+                      <Input
+                        type="text"
+                        value={followupTitle}
+                        onChange={(e) => setFollowupTitle(e.target.value)}
+                        placeholder="e.g. Call back regarding pricing models"
+                        className="w-full h-9 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] pb-1.5 pt-1.5"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                          Expected Due Date
+                        </label>
+                        <FormDatePicker
+                          label=""
+                          registerName="followupDate"
+                          setValue={(_, val) => setFollowupDate(val || '')}
+                          value={followupDate}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                          Task Urgency Priority
+                        </label>
+                        <select
+                          value={followupPriority}
+                          onChange={(e) => setFollowupPriority(e.target.value as any)}
+                          className="w-full h-9 px-3 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none focus:border-[#2563EB]"
+                        >
+                          <option value="Low">Low</option>
+                          <option value="Medium">Medium</option>
+                          <option value="High">High</option>
+                        </select>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        if (!followupTitle) {
+                          alert('Followup title is required.');
+                          return;
+                        }
+                        addTask({
+                          title: followupTitle,
+                          dueDate: followupDate,
+                          priority: followupPriority,
+                          status: 'Pending',
+                          assignedTo: activeActionLead.assignedTo || 'Sarah Jenkins',
+                          category: 'Follow-up',
+                          relatedToType: 'Lead',
+                          relatedToName: activeActionLead.name
+                        });
+                        alert(`Followup task scheduled for ${activeActionLead.name}.`);
+                        setActiveActionLead(null);
+                        setActiveActionType(null);
+                      }}
+                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                    >
+                      Schedule Task
+                    </Button>
+                  </div>
+                )}
+
+                {/* 3. SET MEETING ACTION FORM */}
+                {activeActionType === 'meeting' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                        Briefing / Meeting Subject
+                      </label>
+                      <Input
+                        type="text"
+                        value={meetingTitle}
+                        onChange={(e) => setMeetingTitle(e.target.value)}
+                        placeholder="e.g. Solution demo presentation"
+                        className="w-full h-9 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] pb-1.5 pt-1.5"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                        Meeting Date
+                      </label>
+                      <FormDatePicker
+                        label=""
+                        registerName="meetingDate"
+                        setValue={(_, val) => setMeetingDate(val || '')}
+                        value={meetingDate}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        if (!meetingTitle) {
+                          alert('Meeting subject is required.');
+                          return;
+                        }
+                        addTask({
+                          title: `${meetingTitle} (Meeting)`,
+                          dueDate: meetingDate,
+                          priority: 'High',
+                          status: 'Pending',
+                          assignedTo: activeActionLead.assignedTo || 'Sarah Jenkins',
+                          category: 'Meeting',
+                          relatedToType: 'Lead',
+                          relatedToName: activeActionLead.name
+                        });
+                        alert(`Meeting booked with ${activeActionLead.name}.`);
+                        setActiveActionLead(null);
+                        setActiveActionType(null);
+                      }}
+                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                    >
+                      Book Meeting
+                    </Button>
+                  </div>
+                )}
+
+                {/* 4. CHANGE ASSIGNEE FORM */}
+                {activeActionType === 'assignee' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                        Select Representative
+                      </label>
+                      <select
+                        value={selectedAssignee}
+                        onChange={(e) => setSelectedAssignee(e.target.value)}
+                        className="w-full h-9 px-3 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none focus:border-[#2563EB]"
+                      >
+                        {CRM_USERS.map(u => (
+                          <option key={u.name} value={u.name}>{u.name} - ({u.role})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        onUpdateLead(activeActionLead.id, { assignedTo: selectedAssignee });
+                        alert(`Lead updated. Reassigned to ${selectedAssignee}.`);
+                        setActiveActionLead(null);
+                        setActiveActionType(null);
+                      }}
+                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                    >
+                      Change Representative
+                    </Button>
+                  </div>
+                )}
+
+                {/* 5. SEND EMAIL ACTION FORM */}
+                {activeActionType === 'email' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                        Recipient Address
+                      </label>
+                      <Input
+                        type="text"
+                        disabled
+                        value={activeActionLead.email}
+                        className="w-full h-9 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F3F4F6] text-slate-500 cursor-not-allowed pb-1.5 pt-1.5"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                        Email Subject
+                      </label>
+                      <Input
+                        type="text"
+                        value={emailSubject}
+                        onChange={(e) => setEmailSubject(e.target.value)}
+                        placeholder="Subject..."
+                        className="w-full h-9 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] pb-1.5 pt-1.5"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                        Mail Body Content
+                      </label>
+                      <textarea
+                        rows={6}
+                        value={emailBody}
+                        onChange={(e) => setEmailBody(e.target.value)}
+                        placeholder="Body..."
+                        className="w-full p-3 font-sans text-xs border border-[#E5E7EB] rounded-[6px] outline-none focus:border-[#2563EB] bg-[#F5F6F8] crm-scrollbar"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        if (!emailSubject || !emailBody) {
+                          alert('Email subject and body are required.');
+                          return;
+                        }
+                        // Add activity to show an email was sent trace log
+                        onUpdateLead(activeActionLead.id, {
+                          lastActivity: `Core corporate email sent regarding "${emailSubject}"`
+                        });
+                        alert(`Corporate email dispatched successfully to ${activeActionLead.email}.`);
+                        setActiveActionLead(null);
+                        setActiveActionType(null);
+                      }}
+                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                    >
+                      Send Message
+                    </Button>
+                  </div>
+                )}
+
+                {/* 6. EDIT LEAD ACTION FORM */}
+                {activeActionType === 'edit' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                          First Name
+                        </label>
+                        <Input
+                          type="text"
+                          value={editFirstName}
+                          onChange={(e) => setEditFirstName(e.target.value)}
+                          className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                          Last Name
+                        </label>
+                        <Input
+                          type="text"
+                          value={editLastName}
+                          onChange={(e) => setEditLastName(e.target.value)}
+                          className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                        Company Name
+                      </label>
+                      <Input
+                        type="text"
+                        value={editCompany}
+                        onChange={(e) => setEditCompany(e.target.value)}
+                        className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                          Email Address
+                        </label>
+                        <Input
+                          type="email"
+                          value={editEmail}
+                          onChange={(e) => setEditEmail(e.target.value)}
+                          className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                          Phone Number
+                        </label>
+                        <Input
+                          type="text"
+                          value={editPhone}
+                          onChange={(e) => setEditPhone(e.target.value)}
+                          className="h-8.5 text-xs bg-[#F5F6F8] pb-1 pt-1"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                          Lead Status
+                        </label>
+                        <select
+                          value={editStatus}
+                          onChange={(e) => setEditStatus(e.target.value as any)}
+                          className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
+                        >
+                          <option value="New">New</option>
+                          <option value="Contacted">Contacted</option>
+                          <option value="Working">Working</option>
+                          <option value="Qualified">Qualified</option>
+                          <option value="Nurturing">Nurturing</option>
+                          <option value="Unqualified">Unqualified</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                          Source Sourcing
+                        </label>
+                        <select
+                          value={editSource}
+                          onChange={(e) => setEditSource(e.target.value as any)}
+                          className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
+                        >
+                          <option value="Website">Website</option>
+                          <option value="Referral">Referral</option>
+                          <option value="Cold Call">Cold Call</option>
+                          <option value="Inbound">Inbound</option>
+                          <option value="LinkedIn">LinkedIn</option>
+                          <option value="Ad Campaign">Ad Campaign</option>
+                          <option value="Partnership">Partnership</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                          Account Handler
+                        </label>
+                        <select
+                          value={editAssignedTo}
+                          onChange={(e) => setEditAssignedTo(e.target.value)}
+                          className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
+                        >
+                          {CRM_USERS.map(u => (
+                            <option key={u.name} value={u.name}>{u.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1 select-none">
+                          Risk Priority
+                        </label>
+                        <select
+                          value={editPriority}
+                          onChange={(e) => setEditPriority(e.target.value as any)}
+                          className="w-full h-8.5 px-2 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none"
+                        >
+                          <option value="Low">Low</option>
+                          <option value="Medium">Medium</option>
+                          <option value="High">High</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        if (!editFirstName || !editLastName || !editCompany) {
+                          alert('First Name, Last Name and Company are required.');
+                          return;
+                        }
+                        onUpdateLead(activeActionLead.id, {
+                          firstName: editFirstName,
+                          lastName: editLastName,
+                          name: `${editFirstName} ${editLastName}`,
+                          company: editCompany,
+                          email: editEmail,
+                          phone: editPhone,
+                          status: editStatus,
+                          source: editSource,
+                          priority: editPriority,
+                          assignedTo: editAssignedTo,
+                          lastActivity: `Customer updated profile settings via action menu`
+                        });
+                        alert(`Account Profile for "${editFirstName} ${editLastName}" updated.`);
+                        setActiveActionLead(null);
+                        setActiveActionType(null);
+                      }}
+                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                    >
+                      Update Lead Profile
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 border-t border-[#E5E7EB] bg-[#F5F6F8] flex justify-end">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setActiveActionLead(null);
+                    setActiveActionType(null);
+                  }}
+                  className="h-8 px-4 border border-[#E5E7EB] text-xs text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
+                >
+                  Close Panel
+                </Button>
               </div>
             </>
           )}

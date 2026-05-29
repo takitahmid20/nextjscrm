@@ -6,7 +6,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UseFormRegisterReturn } from 'react-hook-form';
 import { cn } from '@/lib/utils';
-import { Search, ChevronDown, Check } from 'lucide-react';
+import { Search, ChevronDown, Check, Calendar as CalendarIcon } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 interface BaseFieldProps {
   label: string;
@@ -313,6 +315,77 @@ export const FormCheckbox: React.FC<FormCheckboxProps> = ({
         </label>
         {error && <span className="text-[11px] text-red-600 font-medium mt-0.5">{error}</span>}
       </div>
+    </div>
+  );
+};
+
+interface FormDatePickerProps extends BaseFieldProps {
+  value?: string;
+  onChange?: (dateString: string) => void;
+  placeholder?: string;
+  registerName?: string;
+  setValue?: (name: any, value: any, options?: any) => void;
+}
+
+export const FormDatePicker: React.FC<FormDatePickerProps> = ({
+  label,
+  error,
+  id,
+  className,
+  required,
+  value,
+  onChange,
+  placeholder = "Select Date",
+  registerName,
+  setValue,
+}) => {
+  const [open, setOpen] = useState(false);
+  const selectedDate = value ? new Date(value) : undefined;
+
+  const handleSelect = (date: Date | undefined) => {
+    if (date) {
+      // Create local YYYY-MM-DD offset-corrected string
+      const offset = date.getTimezoneOffset();
+      const localDate = new Date(date.getTime() - offset * 60 * 1000);
+      const dateStr = localDate.toISOString().slice(0, 10);
+      
+      if (onChange) {
+        onChange(dateStr);
+      }
+      if (registerName && setValue) {
+        setValue(registerName, dateStr, { shouldValidate: true, shouldDirty: true });
+      }
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div className={cn('flex flex-col space-y-1.5 w-full', className)}>
+      <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] outline-none transition-colors w-full text-left flex items-center justify-between hover:bg-slate-50 focus:border-[#2563EB]',
+              error ? 'border-red-500 bg-red-50/10 focus:ring-red-500 focus:border-red-500' : ''
+            )}
+          >
+            <span>{value ? new Date(value).toLocaleDateString() : placeholder}</span>
+            <CalendarIcon className="h-4 w-4 text-slate-400" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0 bg-white border border-[#E5E7EB] shadow-md z-50 rounded-[8px]" align="start">
+          <Calendar
+            mode="single"
+            selected={selectedDate}
+            onSelect={handleSelect}
+          />
+        </PopoverContent>
+      </Popover>
+      {error && <span className="text-[11px] text-red-600 font-medium">{error}</span>}
     </div>
   );
 };

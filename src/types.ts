@@ -32,6 +32,7 @@ export interface Lead {
     postalCode?: string;
     country?: string;
   };
+  priority?: 'Low' | 'Medium' | 'High';
 }
 
 export type DealStage = 'Lead In' | 'Contact Made' | 'Demo Scheduled' | 'Proposal Sent' | 'Negotiation' | 'Won' | 'Lost';

@@ -15,7 +15,7 @@ function LeadDetailsContent() {
   const searchParams = useSearchParams();
   const leadId = searchParams ? searchParams.get('id') || '' : '';
   
-  const { leads, tasks, updateLead, addTask, toggleTask, deleteTask } = useCRM();
+  const { leads, tasks, updateLead, addTask, toggleTask, deleteTask, addDeal } = useCRM();
 
   return (
     <LeadDetailsView 
@@ -26,6 +26,7 @@ function LeadDetailsContent() {
       onAddTask={addTask}
       onToggleTask={toggleTask}
       onDeleteTask={deleteTask}
+      onAddDeal={addDeal}
       onBack={() => {
         router.push('/leads');
       }}

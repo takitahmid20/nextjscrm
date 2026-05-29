@@ -30,7 +30,7 @@ import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { taskSchema, TaskFormValues } from '../validation';
-import { FormInput, FormSelect } from './forms/FormControls';
+import { FormInput, FormSelect, FormDatePicker } from './forms/FormControls';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 interface TasksViewProps {
@@ -60,6 +60,8 @@ export default function TasksView({
     handleSubmit,
     reset,
     control,
+    setValue,
+    watch,
     formState: { errors },
   } = useForm<TaskFormValues>({
     resolver: zodResolver(taskSchema) as any,
@@ -441,11 +443,12 @@ export default function TasksView({
                 options={categoriesList.map(cat => ({ value: cat, label: cat }))}
               />
 
-              <FormInput
+              <FormDatePicker
                 label="Due date"
-                register={register('dueDate')}
+                registerName="dueDate"
+                setValue={setValue}
+                value={watch('dueDate')}
                 error={errors.dueDate?.message}
-                type="date"
               />
             </div>
 
