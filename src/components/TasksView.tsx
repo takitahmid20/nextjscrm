@@ -32,6 +32,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { taskSchema, TaskFormValues } from '../validation';
 import { FormInput, FormSelect, FormDatePicker } from './forms/FormControls';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { UnifiedTable, UnifiedTableHeader } from './UnifiedTable';
 
 interface TasksViewProps {
   tasks: CRMTask[];
@@ -114,6 +115,16 @@ export default function TasksView({
 
   const completedCount = tasks.filter(t => t.status === 'Completed').length;
   const pendingCount = tasks.filter(t => t.status === 'Pending').length;
+
+  const taskTableHeaders: UnifiedTableHeader[] = [
+    { key: 'status', className: 'w-12 text-center', label: 'Status' },
+    { key: 'title', label: 'Action Title' },
+    { key: 'relatedTo', label: 'Workspace Context' },
+    { key: 'dueDate', label: 'Schedules Due' },
+    { key: 'priority', label: 'Follow-up Level' },
+    { key: 'assignedTo', label: 'Assigned Specialist' },
+    { key: 'delete', className: 'text-center', label: 'Delete' }
+  ];
 
   return (
     <div className="space-y-6">
@@ -242,125 +253,104 @@ export default function TasksView({
           </Card>
 
           {/* Tasks Directory Table */}
-          <div className="bg-white border border-[#E5E7EB] rounded-[8px] overflow-hidden">
-            <div className="overflow-x-auto crm-scrollbar">
-              <Table id="tasks-schedules-table" className="w-full text-left text-xs border-collapse min-w-[750px]">
-                <TableHeader className="bg-[#F5F6F8] text-[#6B7280] uppercase tracking-wider text-[11px] font-semibold border-b border-[#E5E7EB]">
-                  <TableRow className="h-11">
-                    <TableHead className="py-2 px-4 w-12 text-center text-xs text-[#6B7280]">Status</TableHead>
-                    <TableHead className="py-2.5 px-4 text-xs text-[#6B7280]">Action Title</TableHead>
-                    <TableHead className="py-2.5 px-4 text-xs text-[#6B7280]">Workspace Context</TableHead>
-                    <TableHead className="py-2.5 px-4 text-xs text-[#6B7280]">Schedules Due</TableHead>
-                    <TableHead className="py-2.5 px-4 text-xs text-[#6B7280]">Follow-up Level</TableHead>
-                    <TableHead className="py-2.5 px-4 text-xs text-[#6B7280]">Assigned Specialist</TableHead>
-                    <TableHead className="py-2.5 px-4 text-center text-xs text-[#6B7280]">Delete</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody className="divide-y divide-[#E5E7EB] text-[#111827]">
-                  {filteredTasks.length === 0 ? (
-                    <tr className="h-24">
-                      <td colSpan={7} className="text-center text-[#6B7280]">
-                        No task schedules match filter constraints.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredTasks.map((task) => {
-                      const isCompleted = task.status === 'Completed';
+          <UnifiedTable
+            id="tasks-schedules-table"
+            data={filteredTasks}
+            headers={taskTableHeaders}
+            emptyStateText="No task schedules match filter constraints."
+            renderRow={(task) => {
+              const isCompleted = task.status === 'Completed';
 
-                      // Fine-grain priority indicator style
-                      let priorityClass = 'bg-gray-100 text-gray-800 border-gray-200';
-                      if (task.priority === 'High') priorityClass = 'bg-red-50 text-red-800 border-red-150';
-                      else if (task.priority === 'Medium') priorityClass = 'bg-amber-50 text-amber-850 border-amber-150';
+              // Fine-grain priority indicator style
+              let priorityClass = 'bg-gray-100 text-gray-800 border-gray-200';
+              if (task.priority === 'High') priorityClass = 'bg-red-50 text-red-800 border-red-150';
+              else if (task.priority === 'Medium') priorityClass = 'bg-amber-50 text-amber-850 border-amber-150';
 
-                      // Category rendering symbols
-                      let catIcon = <CheckSquare className="h-3.5 w-3.5" />;
-                      if (task.category === 'Call') catIcon = <PhoneCall className="h-3.5 w-3.5 text-[#2563EB]" />;
-                      else if (task.category === 'Email') catIcon = <Mail className="h-3.5 w-3.5 text-[#2563EB]" />;
-                      else if (task.category === 'Meeting') catIcon = <Calendar className="h-3.5 w-3.5 text-indigo-600" />;
+              // Category rendering symbols
+              let catIcon = <CheckSquare className="h-3.5 w-3.5" />;
+              if (task.category === 'Call') catIcon = <PhoneCall className="h-3.5 w-3.5 text-[#2563EB]" />;
+              else if (task.category === 'Email') catIcon = <Mail className="h-3.5 w-3.5 text-[#2563EB]" />;
+              else if (task.category === 'Meeting') catIcon = <Calendar className="h-3.5 w-3.5 text-indigo-600" />;
 
-                      return (
-                        <tr 
-                          key={task.id} 
-                          className={`h-12 hover:bg-[#F5F6F8]/60 transition-colors ${
-                            isCompleted ? 'bg-slate-50/70 text-[#6B7280]' : ''
-                          }`}
-                        >
-                          {/* Toggle Task Complete checkbox */}
-                          <td className="py-2 px-4 text-center">
-                            <button
-                              id={`btn-toggle-task-${task.id}`}
-                              onClick={() => {
-                                onToggleTask(task.id);
-                              }}
-                              className="text-[#6B7280] hover:text-[#2563EB] transition-colors p-1"
-                              title={isCompleted ? "Mark as pending" : "Mark as completed"}
-                            >
-                              {isCompleted ? (
-                                <CheckSquare className="h-4.5 w-4.5 text-[#2563EB]" />
-                              ) : (
-                                <Square className="h-4.5 w-4.5 text-[#E5E7EB]" />
-                              )}
-                            </button>
-                          </td>
+              return (
+                <tr 
+                  key={task.id} 
+                  className={`h-12 hover:bg-[#F5F6F8]/60 transition-colors border-b border-[#E5E7EB] ${
+                    isCompleted ? 'bg-slate-50/70 text-[#6B7280]' : ''
+                  }`}
+                >
+                  {/* Toggle Task Complete checkbox */}
+                  <td className="py-2 px-4 text-center">
+                    <button
+                      id={`btn-toggle-task-${task.id}`}
+                      onClick={() => {
+                        onToggleTask(task.id);
+                      }}
+                      className="text-[#6B7280] hover:text-[#2563EB] transition-colors p-1 cursor-pointer"
+                      title={isCompleted ? "Mark as pending" : "Mark as completed"}
+                    >
+                      {isCompleted ? (
+                        <CheckSquare className="h-4.5 w-4.5 text-[#2563EB]" />
+                      ) : (
+                        <Square className="h-4.5 w-4.5 text-[#E5E7EB]" />
+                      )}
+                    </button>
+                  </td>
 
-                          {/* Title */}
-                          <td className="py-2 px-4">
-                            <div className="flex items-center space-x-2.5 select-all">
-                              <span className="p-1 bg-[#EFF6FF] rounded">{catIcon}</span>
-                              <span className={`font-semibold text-xs text-[#111827] ${isCompleted ? 'line-through text-[#6B7280]' : ''}`}>
-                                {task.title}
-                              </span>
-                            </div>
-                          </td>
+                  {/* Title */}
+                  <td className="py-2 px-4">
+                    <div className="flex items-center space-x-2.5 select-all">
+                      <span className="p-1 bg-[#EFF6FF] rounded">{catIcon}</span>
+                      <span className={`font-semibold text-xs text-[#111827] ${isCompleted ? 'line-through text-[#6B7280]' : ''}`}>
+                        {task.title}
+                      </span>
+                    </div>
+                  </td>
 
-                          {/* Related CRM entity */}
-                          <td className="py-2 px-4">
-                            {task.relatedToType !== 'None' ? (
-                              <div className="flex items-center space-x-1 font-semibold text-[11px] text-[#6B7280]">
-                                {task.relatedToType === 'Lead' ? <Users className="h-3 w-3 text-blue-500" /> : <Briefcase className="h-3 w-3 text-indigo-500" />}
-                                <span className="hover:text-blue-600 transition-colors uppercase">{task.relatedToName}</span>
-                              </div>
-                            ) : (
-                              <span className="text-[#6B7280] italic">General schedule</span>
-                            )}
-                          </td>
+                  {/* Related CRM entity */}
+                  <td className="py-2 px-4">
+                    {task.relatedToType !== 'None' ? (
+                      <div className="flex items-center space-x-1 font-semibold text-[11px] text-[#6B7280]">
+                        {task.relatedToType === 'Lead' ? <Users className="h-3 w-3 text-blue-500" /> : <Briefcase className="h-3 w-3 text-indigo-500" />}
+                        <span className="hover:text-blue-600 transition-colors uppercase">{task.relatedToName}</span>
+                      </div>
+                    ) : (
+                      <span className="text-[#6B7280] italic">General schedule</span>
+                    )}
+                  </td>
 
-                          {/* Due Date */}
-                          <td className="py-2 px-4 font-mono font-medium text-[#6B7280]">
-                            {task.dueDate}
-                          </td>
+                  {/* Due Date */}
+                  <td className="py-2 px-4 font-mono font-medium text-[#6B7280]">
+                    {task.dueDate}
+                  </td>
 
-                          {/* Priority badge */}
-                          <td className="py-2 px-4">
-                            <span className={`px-2 py-0.5 border text-[10px] rounded-[4px] font-bold ${priorityClass}`}>
-                              {task.priority}
-                            </span>
-                          </td>
+                  {/* Priority badge */}
+                  <td className="py-2 px-4">
+                    <span className={`px-2 py-0.5 border text-[10px] rounded-[4px] font-bold ${priorityClass}`}>
+                      {task.priority}
+                    </span>
+                  </td>
 
-                          {/* Assigned Agent */}
-                          <td className="py-2 px-4 font-medium text-[#111827]">
-                            {task.assignedTo}
-                          </td>
+                  {/* Assigned Agent */}
+                  <td className="py-2 px-4 font-medium text-[#111827]">
+                    {task.assignedTo}
+                  </td>
 
-                          {/* Row delete action */}
-                          <td className="py-2 px-4 text-center">
-                            <button
-                              id={`btn-delete-task-${task.id}`}
-                              onClick={() => onDeleteTask(task.id)}
-                              className="p-1 hover:bg-red-50 text-[#6B7280] hover:text-red-700 rounded transition-colors cursor-pointer"
-                              title="Delete task assignment"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
+                  {/* Row delete action */}
+                  <td className="py-2 px-4 text-center">
+                    <button
+                      id={`btn-delete-task-${task.id}`}
+                      onClick={() => onDeleteTask(task.id)}
+                      className="p-1 hover:bg-red-50 text-[#6B7280] hover:text-red-700 rounded transition-colors cursor-pointer"
+                      title="Delete task assignment"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
+                </tr>
+              );
+            }}
+          />
 
         </div>
 

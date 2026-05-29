@@ -6,9 +6,9 @@
 import { z } from 'zod';
 
 /**
- * Enterprise validation schema for corporate lead registration
+ * Enterprise validation base schema for customer entity demographics
  */
-export const leadSchema = z.object({
+export const baseEntitySchema = z.object({
   firstName: z
     .string()
     .min(1, { message: 'First name is required.' })
@@ -33,7 +33,6 @@ export const leadSchema = z.object({
     .string()
     .min(5, { message: 'Phone number is too short.' })
     .or(z.literal('')),
-  status: z.enum(['New', 'Contacted', 'Working', 'Qualified', 'Nurturing', 'Unqualified']),
   source: z.enum(['Website', 'Referral', 'Cold Call', 'Inbound', 'LinkedIn', 'Ad Campaign', 'Partnership']),
   assignedTo: z.string().min(1, { message: 'Please assign a manager/specialist.' }),
   notes: z.string().max(500, { message: 'Notes cannot exceed 500 characters.' }).optional(),
@@ -46,6 +45,20 @@ export const leadSchema = z.object({
   addressPostalCode: z.string().optional(),
   addressCountry: z.string().optional(),
   priority: z.enum(['Low', 'Medium', 'High']).optional(),
+});
+
+/**
+ * Enterprise validation schema for corporate contact registration (extends base demographics)
+ */
+export const contactSchema = baseEntitySchema;
+
+export type ContactFormValues = z.infer<typeof contactSchema>;
+
+/**
+ * Enterprise validation schema for corporate lead registration (extends base demographics with status)
+ */
+export const leadSchema = baseEntitySchema.extend({
+  status: z.enum(['New', 'Contacted', 'Working', 'Qualified', 'Nurturing', 'Unqualified']),
 });
 
 export type LeadFormValues = z.infer<typeof leadSchema>;
@@ -121,47 +134,3 @@ export const taskSchema = z.object({
 });
 
 export type TaskFormValues = z.infer<typeof taskSchema>;
-
-/**
- * Enterprise validation schema for corporate contact registration
- */
-export const contactSchema = z.object({
-  firstName: z
-    .string()
-    .min(1, { message: 'First name is required.' })
-    .max(30, { message: 'First name cannot exceed 30 characters.' })
-    .trim(),
-  lastName: z
-    .string()
-    .min(1, { message: 'Last name is required.' })
-    .max(30, { message: 'Last name cannot exceed 30 characters.' })
-    .trim(),
-  name: z.string().optional(),
-  company: z
-    .string()
-    .min(2, { message: 'Company name must be at least 2 characters.' })
-    .max(50, { message: 'Company name cannot exceed 50 characters.' })
-    .trim(),
-  email: z
-    .string()
-    .email({ message: 'Must be a valid corporate email address (e.g., mail@corp.com).' })
-    .or(z.literal('')),
-  phone: z
-    .string()
-    .min(5, { message: 'Phone number is too short.' })
-    .or(z.literal('')),
-  source: z.enum(['Website', 'Referral', 'Cold Call', 'Inbound', 'LinkedIn', 'Ad Campaign', 'Partnership']),
-  assignedTo: z.string().min(1, { message: 'Please assign a manager/specialist.' }),
-  notes: z.string().max(500, { message: 'Notes cannot exceed 500 characters.' }).optional(),
-  companyWebsite: z.string().or(z.literal('')).optional(),
-  facebook: z.string().or(z.literal('')).optional(),
-  emailOptOut: z.boolean().optional(),
-  addressStreet: z.string().optional(),
-  addressCity: z.string().optional(),
-  addressState: z.string().optional(),
-  addressPostalCode: z.string().optional(),
-  addressCountry: z.string().optional(),
-  priority: z.enum(['Low', 'Medium', 'High']).optional(),
-});
-
-export type ContactFormValues = z.infer<typeof contactSchema>;

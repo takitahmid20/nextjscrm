@@ -6,20 +6,23 @@
 "use client";
 
 import React, { Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useCRM } from '../../context/CRMContext';
-import LeadDetailsView from '../../components/LeadDetailsView';
+import { useRouter } from 'next/navigation';
+import { useCRM } from '../../../context/CRMContext';
+import LeadDetailsView from '../../../components/LeadDetailsView';
 
-function LeadDetailsContent() {
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
+
+function LeadDetailsContent({ params }: PageProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const leadId = searchParams ? searchParams.get('id') || '' : '';
+  const { id } = React.use(params);
   
   const { leads, tasks, updateLead, addTask, toggleTask, deleteTask, addDeal } = useCRM();
 
   return (
     <LeadDetailsView 
-      leadId={leadId}
+      leadId={id}
       leads={leads}
       tasks={tasks}
       onUpdateLead={updateLead}
@@ -34,10 +37,10 @@ function LeadDetailsContent() {
   );
 }
 
-export default function LeadDetailsPage() {
+export default function LeadDetailsPage({ params }: PageProps) {
   return (
     <Suspense fallback={<div className="p-6 text-center">Loading Lead Details...</div>}>
-      <LeadDetailsContent />
+      <LeadDetailsContent params={params} />
     </Suspense>
   );
 }

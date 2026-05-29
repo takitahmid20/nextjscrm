@@ -6,7 +6,7 @@
 export type LeadStatus = 'New' | 'Contacted' | 'Working' | 'Qualified' | 'Nurturing' | 'Unqualified';
 export type LeadSource = 'Website' | 'Referral' | 'Cold Call' | 'Inbound' | 'LinkedIn' | 'Ad Campaign' | 'Partnership';
 
-export interface Lead {
+export interface BaseEntity {
   id: string;
   name: string;
   firstName?: string;
@@ -14,11 +14,9 @@ export interface Lead {
   company: string;
   email: string;
   phone: string;
-  status: LeadStatus;
   source: LeadSource;
   assignedTo: string; // User ID or Name
   lastActivity: string; // ISO date or descriptive string
-  dealValue: number;
   createdAt: string;
   notes?: string;
   notes_history?: Array<{ id: string; content: string; date: string; author: string }>;
@@ -33,6 +31,12 @@ export interface Lead {
     country?: string;
   };
   priority?: 'Low' | 'Medium' | 'High';
+  dealValue?: number;
+}
+
+export interface Lead extends BaseEntity {
+  status: LeadStatus;
+  dealValue: number; // Override to be required
 }
 
 export type DealStage = 'Lead In' | 'Contact Made' | 'Demo Scheduled' | 'Proposal Sent' | 'Negotiation' | 'Won' | 'Lost';
@@ -85,32 +89,6 @@ export interface CRMUser {
   avatarColor: string;
 }
 
-export interface Contact {
-  id: string;
-  name: string;
-  firstName?: string;
-  lastName?: string;
-  company: string;
-  email: string;
-  phone: string;
-  source: LeadSource;
-  assignedTo: string; // User ID or Name
-  lastActivity: string; // ISO date or descriptive string
-  createdAt: string;
-  notes?: string;
-  notes_history?: Array<{ id: string; content: string; date: string; author: string }>;
-  companyWebsite?: string;
-  facebook?: string;
-  emailOptOut?: boolean;
-  addressInfo?: {
-    street?: string;
-    city?: string;
-    state?: string;
-    postalCode?: string;
-    country?: string;
-  };
-  priority?: 'Low' | 'Medium' | 'High';
+export interface Contact extends BaseEntity {
   convertedFromLeadId?: string;
-  dealValue?: number;
 }
-

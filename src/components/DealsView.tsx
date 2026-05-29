@@ -32,6 +32,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { dealSchema, DealFormValues } from '../validation';
 import { FormInput, FormSelect, FormDatePicker } from './forms/FormControls';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { UnifiedTable, UnifiedTableHeader } from './UnifiedTable';
 
 interface DealsViewProps {
   deals: Deal[];
@@ -141,6 +142,18 @@ export default function DealsView({
     setShowAddModal(false);
   };
 
+  // Headers for UnifiedTable (Deals spreadsheet mode)
+  const dealTableHeaders: UnifiedTableHeader[] = [
+    { key: 'title', label: 'Deal & Opportunity' },
+    { key: 'company', label: 'Associated Account' },
+    { key: 'stage', label: 'Funnel Column Stage' },
+    { key: 'status', label: 'Status Tag' },
+    { key: 'expectedCloseDate', label: 'Expected Closing Target' },
+    { key: 'value', className: 'text-right', label: 'Contract Valuation' },
+    { key: 'assignedTo', label: 'Assigned Rep' },
+    { key: 'config', className: 'text-center', label: 'Config' }
+  ];
+
   return (
     <div className="space-y-6">
       {/* Page Title & View Config switcher */}
@@ -238,69 +251,47 @@ export default function DealsView({
             </span>
           </Card>
 
-          <div className="bg-white border border-[#E5E7EB] rounded-[8px] overflow-hidden">
-            <div className="overflow-x-auto crm-scrollbar">
-              <Table id="deals-spreadsheet-table" className="w-full text-left text-xs border-collapse min-w-[900px]">
-                <TableHeader className="bg-[#F5F6F8] text-[#6B7280] uppercase tracking-wider text-[11px] font-semibold border-b border-[#E5E7EB]">
-                  <TableRow className="h-11">
-                    <TableHead className="py-2.5 px-4 font-semibold text-xs text-[#6B7280]">Deal & Opportunity</TableHead>
-                    <TableHead className="py-2.5 px-4 font-semibold text-xs text-[#6B7280]">Associated Account</TableHead>
-                    <TableHead className="py-2.5 px-4 font-semibold text-xs text-[#6B7280]">Funnel Column Stage</TableHead>
-                    <TableHead className="py-2.5 px-4 font-semibold text-xs text-[#6B7280]">Status Tag</TableHead>
-                    <TableHead className="py-2.5 px-4 font-semibold text-xs text-[#6B7280]">Expected Closing Target</TableHead>
-                    <TableHead className="py-2.5 px-4 font-semibold text-right text-xs text-[#6B7280]">Contract Valuation</TableHead>
-                    <TableHead className="py-2.5 px-4 font-semibold text-xs text-[#6B7280]">Assigned Rep</TableHead>
-                    <TableHead className="py-2.5 px-4 font-semibold text-center text-xs text-[#6B7280]">Config</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody className="divide-y divide-[#E5E7EB] text-[#111827]">
-                  {filteredDealsList.length === 0 ? (
-                    <tr className="h-20">
-                      <td colSpan={8} className="text-center text-[#6B7280]">
-                        No sales pipeline records fit your filters.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredDealsList.map((deal) => (
-                      <tr 
-                        key={deal.id} 
-                        className="h-[52px] hover:bg-slate-50 transition-all cursor-pointer"
-                        onClick={() => setSelectedDeal(deal)}
-                      >
-                        <td className="py-2 px-4 font-semibold text-blue-600 hover:underline">{deal.title}</td>
-                        <td className="py-2 px-4 font-medium">{deal.company}</td>
-                        <td className="py-2 px-4">
-                          <span className="px-2 py-0.5 bg-gray-100 rounded text-[11px] font-medium font-mono text-[#6B7280] border border-gray-200">
-                            {deal.stage}
-                          </span>
-                        </td>
-                        <td className="py-2 px-4">
-                          <span className={`px-2 py-0.5 rounded-[4px] text-[11px] font-bold border ${
-                            deal.status === 'Won' ? 'bg-emerald-50 text-emerald-800 border-emerald-150' :
-                            deal.status === 'Lost' ? 'bg-red-50 text-red-800 border-red-150' :
-                            'bg-blue-50 text-blue-800 border-blue-150'
-                          }`}>
-                            {deal.status}
-                          </span>
-                        </td>
-                        <td className="py-2 px-4 font-mono text-[#6B7280]">{deal.expectedCloseDate}</td>
-                        <td className="py-2 px-4 text-right font-bold text-slate-900">{formatUSD(deal.value)}</td>
-                        <td className="py-2 px-4">{deal.assignedTo}</td>
-                        <td className="py-2 px-4 text-center" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => setSelectedDeal(deal)}
-                            className="text-xs text-blue-600 hover:text-blue-800 font-semibold"
-                          >
-                            Edit
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
+          <UnifiedTable
+            id="deals-spreadsheet-table"
+            data={filteredDealsList}
+            headers={dealTableHeaders}
+            emptyStateText="No sales pipeline records fit your filters."
+            renderRow={(deal) => (
+              <tr 
+                key={deal.id} 
+                className="h-[52px] hover:bg-slate-50 transition-all border-b border-[#E5E7EB] cursor-pointer"
+                onClick={() => setSelectedDeal(deal)}
+              >
+                <td className="py-2 px-4 font-semibold text-blue-600 hover:underline">{deal.title}</td>
+                <td className="py-2 px-4 font-medium">{deal.company}</td>
+                <td className="py-2 px-4">
+                  <span className="px-2 py-0.5 bg-gray-100 rounded text-[11px] font-medium font-mono text-[#6B7280] border border-gray-200">
+                    {deal.stage}
+                  </span>
+                </td>
+                <td className="py-2 px-4">
+                  <span className={`px-2 py-0.5 rounded-[4px] text-[11px] font-bold border ${
+                    deal.status === 'Won' ? 'bg-emerald-50 text-emerald-800 border-emerald-150' :
+                    deal.status === 'Lost' ? 'bg-red-50 text-red-800 border-red-150' :
+                    'bg-blue-50 text-blue-800 border-blue-150'
+                  }`}>
+                    {deal.status}
+                  </span>
+                </td>
+                <td className="py-2 px-4 font-mono text-[#6B7280]">{deal.expectedCloseDate}</td>
+                <td className="py-2 px-4 text-right font-bold text-slate-900">{formatUSD(deal.value)}</td>
+                <td className="py-2 px-4">{deal.assignedTo}</td>
+                <td className="py-2 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => setSelectedDeal(deal)}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
+                  >
+                    Edit
+                  </button>
+                </td>
+              </tr>
+            )}
+          />
         </div>
       ) : (
         /* ROBUST KANBAN PIPELINE VIEW */

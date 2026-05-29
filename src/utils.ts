@@ -413,138 +413,129 @@ export function formatRelativeTime(isoString: string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// Simple export CSV simulation (returns plain CSV text representation)
+// Generic export CSV helper
+export function exportToCSV<T>(
+  data: T[],
+  headers: string[],
+  rowMapper: (item: T) => any[]
+): string {
+  const rows = data.map(item => rowMapper(item).map(val => {
+    const strVal = String(val ?? '');
+    return `"${strVal.replace(/"/g, '""')}"`;
+  }).join(','));
+  return [headers.join(','), ...rows].join('\n');
+}
+
+// Generic parse CSV helper
+export function parseCSV<T>(
+  csvText: string,
+  rowBuilder: (fields: Record<string, string>) => T | null
+): T[] {
+  const lines = csvText.split('\n').filter(line => line.trim().length > 0);
+  if (lines.length <= 1) return [];
+  
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
+  const results: T[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    const line = lines[i];
+
+    for (let j = 0; j < line.length; j++) {
+      const char = line[j];
+      if (char === '"' || char === "'") {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        values.push(current.trim().replace(/^["']|["']$/g, ''));
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    values.push(current.trim().replace(/^["']|["']$/g, ''));
+
+    const fieldsRecord: Record<string, string> = {};
+    headers.forEach((header, index) => {
+      fieldsRecord[header] = values[index] || '';
+    });
+
+    const parsed = rowBuilder(fieldsRecord);
+    if (parsed) {
+      results.push(parsed);
+    }
+  }
+
+  return results;
+}
+
 export function exportLeadsToCSV(leads: Lead[]): string {
   const headers = ['ID', 'Lead Name', 'Company', 'Email', 'Phone', 'Status', 'Source', 'Deal Value ($)', 'Assigned User', 'Created At'];
-  const rows = leads.map(l => [
+  return exportToCSV(leads, headers, l => [
     l.id,
-    `"${l.name.replace(/"/g, '""')}"`,
-    `"${l.company.replace(/"/g, '""')}"`,
+    l.name,
+    l.company,
     l.email,
     l.phone,
     l.status,
     l.source,
     l.dealValue,
-    `"${l.assignedTo.replace(/"/g, '""')}"`,
+    l.assignedTo,
     l.createdAt
   ]);
-  
-  return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 }
 
-// Simple parse CSV parser
 export function parseCSVToLeads(csvText: string): Partial<Lead>[] {
-  const lines = csvText.split('\n').filter(line => line.trim().length > 0);
-  if (lines.length <= 1) return [];
-  
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
-  const results: Partial<Lead>[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    const line = lines[i];
-
-    for (let j = 0; j < line.length; j++) {
-      const char = line[j];
-      if (char === '"' || char === "'") {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        values.push(current.trim().replace(/^["']|["']$/g, ''));
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    values.push(current.trim().replace(/^["']|["']$/g, ''));
-
-    const obj: any = {};
-    headers.forEach((header, index) => {
-      const val = values[index];
-      if (!val) return;
-      if (header.toLowerCase().includes('name')) obj.name = val;
-      else if (header.toLowerCase().includes('company')) obj.company = val;
-      else if (header.toLowerCase().includes('email')) obj.email = val;
-      else if (header.toLowerCase().includes('phone')) obj.phone = val;
-      else if (header.toLowerCase().includes('value')) obj.dealValue = Number(val) || 0;
-      else if (header.toLowerCase().includes('status')) obj.status = val;
-      else if (header.toLowerCase().includes('source')) obj.source = val;
-      else if (header.toLowerCase().includes('assigned')) obj.assignedTo = val;
-    });
-
-    if (obj.name && obj.company) {
-      results.push(obj);
-    }
-  }
-
-  return results;
+  return parseCSV<Partial<Lead>>(csvText, fields => {
+    const name = fields['lead name'] || fields['name'] || '';
+    const company = fields['company'] || '';
+    if (!name && !company) return null;
+    
+    return {
+      name,
+      company,
+      email: fields['email'] || '',
+      phone: fields['phone'] || '',
+      dealValue: Number(fields['deal value ($)']) || Number(fields['value']) || 0,
+      status: fields['status'] as any,
+      source: fields['source'] as any,
+      assignedTo: fields['assigned user'] || fields['assignedto'] || '',
+    };
+  });
 }
 
-// Simple export CSV simulation for Contacts
 export function exportContactsToCSV(contacts: Contact[]): string {
   const headers = ['ID', 'Contact Name', 'Company', 'Email', 'Phone', 'Source', 'Priority', 'Deal Value ($)', 'Assigned User', 'Created At'];
-  const rows = contacts.map(c => [
+  return exportToCSV(contacts, headers, c => [
     c.id,
-    `"${c.name.replace(/"/g, '""')}"`,
-    `"${c.company.replace(/"/g, '""')}"`,
+    c.name,
+    c.company,
     c.email || '',
     c.phone || '',
     c.source,
     c.priority || 'Medium',
     c.dealValue || 0,
-    `"${(c.assignedTo || '').replace(/"/g, '""')}"`,
+    c.assignedTo || '',
     c.createdAt
   ]);
-  
-  return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 }
 
-// Simple parse CSV parser for Contacts
 export function parseCSVToContacts(csvText: string): Partial<Contact>[] {
-  const lines = csvText.split('\n').filter(line => line.trim().length > 0);
-  if (lines.length <= 1) return [];
-  
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
-  const results: Partial<Contact>[] = [];
+  return parseCSV<Partial<Contact>>(csvText, fields => {
+    const name = fields['contact name'] || fields['name'] || '';
+    const company = fields['company'] || '';
+    if (!name && !company) return null;
 
-  for (let i = 1; i < lines.length; i++) {
-    const values: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    const line = lines[i];
-
-    for (let j = 0; j < line.length; j++) {
-      const char = line[j];
-      if (char === '"' || char === "'") {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        values.push(current.trim().replace(/^["']|["']$/g, ''));
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    values.push(current.trim().replace(/^["']|["']$/g, ''));
-
-    const obj: any = {};
-    headers.forEach((header, index) => {
-      const val = values[index];
-      if (!val) return;
-      if (header.toLowerCase().includes('name')) obj.name = val;
-      else if (header.toLowerCase().includes('company')) obj.company = val;
-      else if (header.toLowerCase().includes('email')) obj.email = val;
-      else if (header.toLowerCase().includes('phone')) obj.phone = val;
-      else if (header.toLowerCase().includes('source')) obj.source = val;
-      else if (header.toLowerCase().includes('priority')) obj.priority = val;
-      else if (header.toLowerCase().includes('val')) obj.dealValue = Number(val) || 0;
-      else if (header.toLowerCase().includes('assigned')) obj.assignedTo = val;
-    });
-
-    if (obj.name && obj.company) {
-      results.push(obj);
-    }
-  }
-
-  return results;
+    return {
+      name,
+      company,
+      email: fields['email'] || '',
+      phone: fields['phone'] || '',
+      source: fields['source'] as any,
+      priority: fields['priority'] as any,
+      dealValue: Number(fields['deal value ($)']) || Number(fields['val']) || Number(fields['value']) || 0,
+      assignedTo: fields['assigned user'] || fields['assignedto'] || '',
+    };
+  });
 }

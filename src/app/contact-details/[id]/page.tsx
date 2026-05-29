@@ -6,20 +6,23 @@
 "use client";
 
 import React, { Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useCRM } from '../../context/CRMContext';
-import ContactDetailsView from '../../components/ContactDetailsView';
+import { useRouter } from 'next/navigation';
+import { useCRM } from '../../../context/CRMContext';
+import ContactDetailsView from '../../../components/ContactDetailsView';
 
-function ContactDetailsContent() {
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
+
+function ContactDetailsContent({ params }: PageProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const contactId = searchParams ? searchParams.get('id') || '' : '';
+  const { id } = React.use(params);
   
   const { contacts, tasks, updateContact, addTask, toggleTask, deleteTask, addDeal } = useCRM();
 
   return (
     <ContactDetailsView 
-      contactId={contactId}
+      contactId={id}
       contacts={contacts}
       tasks={tasks}
       onUpdateContact={updateContact}
@@ -34,10 +37,10 @@ function ContactDetailsContent() {
   );
 }
 
-export default function ContactDetailsPage() {
+export default function ContactDetailsPage({ params }: PageProps) {
   return (
     <Suspense fallback={<div className="p-6 text-center text-slate-500 text-xs font-semibold">Loading Contact Details Profiles...</div>}>
-      <ContactDetailsContent />
+      <ContactDetailsContent params={params} />
     </Suspense>
   );
 }

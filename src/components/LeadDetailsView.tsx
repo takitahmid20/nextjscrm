@@ -3,40 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+"use client";
+
 import React, { useState } from 'react';
-import { 
-  ArrowLeft, 
-  Mail, 
-  Phone, 
-  DollarSign, 
-  Activity as ActivityIcon, 
-  Plus, 
-  Trash2, 
-  CheckCircle, 
-  User, 
-  Calendar as CalendarIcon, 
-  MessageSquare, 
-  CheckSquare, 
-  Square,
-  Sparkles,
-  TrendingUp,
-  Briefcase,
-  MapPin,
-  MoreVertical,
-  Globe,
-  Facebook
-} from 'lucide-react';
-import { Lead, LeadStatus, LeadSource, CRMTask, Activity, Deal, DealStage } from '../types';
-import { CRM_USERS, formatUSD, formatRelativeTime } from '../utils';
+import { ArrowLeft, Mail, User, Sparkles, TrendingUp, MoreVertical, Briefcase } from 'lucide-react';
+import { Lead, CRMTask, Deal } from '../types';
 import { useCRM } from '../context/CRMContext';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { FormSelect } from './forms/FormControls';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+
+// Modular Refactored CRM components imports
+import CRMProgressBanner from './details/CRMProgressBanner';
+import CRMDemographicsCard from './details/CRMDemographicsCard';
+import CRMAddressCard from './details/CRMAddressCard';
+import CRMInteractionTabs from './details/CRMInteractionTabs';
+import CRMEditEntitySheet from './sheets/CRMEditEntitySheet';
+import CRMOutboundEmailSheet from './sheets/CRMOutboundEmailSheet';
+import CRMConvertLeadSheet from './sheets/CRMConvertLeadSheet';
 
 interface LeadDetailsViewProps {
   leadId: string;
@@ -61,8 +45,40 @@ export default function LeadDetailsView({
   onAddDeal,
   onBack
 }: LeadDetailsViewProps) {
+  const { addContact } = useCRM();
+
   // Find the current lead
   const lead = leads.find(l => l.id === leadId);
+
+  // Sheets Visibility state
+  const [showEditSheet, setShowEditSheet] = useState(false);
+  const [showEmailSheet, setShowEmailSheet] = useState(false);
+  const [showConvertSheet, setShowConvertSheet] = useState(false);
+
+  // Email template values
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+
+  // Load timeline notes history from lead record
+  const rawHistory: Array<{ id: string; content: string; date: string; author: string }> = (lead as any)?.notes_history || [];
+  const notesHistory = React.useMemo(() => {
+    if (!lead) return [];
+    if (rawHistory.length === 0 && lead.notes) {
+      return [{
+        id: 'INIT-NOTE',
+        content: lead.notes,
+        date: lead.createdAt,
+        author: lead.assignedTo || 'System Automated'
+      }];
+    }
+    return rawHistory;
+  }, [rawHistory, lead]);
+
+  // Filter tasks linked specifically to this Lead
+  const relatedTasks = React.useMemo(() => {
+    if (!lead) return [];
+    return tasks.filter(t => t.relatedToType === 'Lead' && t.relatedToName === lead.name);
+  }, [tasks, lead]);
 
   // Fallback if lead not found
   if (!lead) {
@@ -79,186 +95,112 @@ export default function LeadDetailsView({
     );
   }
 
-  // Local state for edits & new inputs
-  const [activeTab, setActiveTab] = useState<'notes' | 'followup' | 'meeting'>('notes');
-  const [showEditSheet, setShowEditSheet] = useState(false);
-  const [showConvertSheet, setShowConvertSheet] = useState(false);
-  const [showEmailSheet, setShowEmailSheet] = useState(false);
-
-  // Edit Lead fields with defaults mapped securely
-  const [editFirstName, setEditFirstName] = useState(lead.firstName || lead.name.split(' ')[0] || '');
-  const [editLastName, setEditLastName] = useState(lead.lastName || lead.name.split(' ').slice(1).join(' ') || '');
-  const [editCompany, setEditCompany] = useState(lead.company || '');
-  const [editEmail, setEditEmail] = useState(lead.email || '');
-  const [editPhone, setEditPhone] = useState(lead.phone || '');
-  const [editStatus, setEditStatus] = useState<LeadStatus>(lead.status || 'New');
-  const [editSource, setEditSource] = useState<LeadSource>(lead.source || 'Website');
-  const [editPriority, setEditPriority] = useState<'Low' | 'Medium' | 'High'>(lead.priority || 'Medium');
-  const [editWebsite, setEditWebsite] = useState((lead as any).companyWebsite || (lead as any).website || '');
-  const [editFacebook, setEditFacebook] = useState((lead as any).facebook || '');
-  const [editEmailOptOut, setEditEmailOptOut] = useState(!!(lead as any).emailOptOut);
-  const [editStreet, setEditStreet] = useState(lead.addressInfo?.street || '');
-  const [editCity, setEditCity] = useState(lead.addressInfo?.city || '');
-  const [editState, setEditState] = useState(lead.addressInfo?.state || '');
-  const [editPostalCode, setEditPostalCode] = useState(lead.addressInfo?.postalCode || '');
-  const [editCountry, setEditCountry] = useState(lead.addressInfo?.country || '');
-  const [editAssignedTo, setEditAssignedTo] = useState(lead.assignedTo || 'Sarah Jenkins');
-  const [editNotes, setEditNotes] = useState(lead.notes || '');
-
-  // Send Email states
-  const [emailSubject, setEmailSubject] = useState(`Introductory Briefing regarding ${lead.company}`);
-  const [emailBody, setEmailBody] = useState(`Hi ${lead.name},\n\nI hope you're having a productive week. I wanted to touch base regarding solutions we've outlined for ${lead.company}...\n\nBest regards,\n${lead.assignedTo || 'Sarah Jenkins'}`);
-
-  const [newNoteContent, setNewNoteContent] = useState('');
-  const [editNotesId, setEditNotesId] = useState<string | null>(null);
-  const [editNotesText, setEditNotesText] = useState('');
-  
-  // Follow-up form states
-  const [newFollowupTitle, setNewFollowupTitle] = useState('');
-  const [newFollowupPriority, setNewFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('Medium');
-  const [newFollowupCategory, setNewFollowupCategory] = useState<'Call' | 'Email' | 'Meeting' | 'Proposal' | 'Follow-up'>('Follow-up');
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [openDatePicker, setOpenDatePicker] = useState(false);
-
-  // Meeting form states
-  const [newMeetingTitle, setNewMeetingTitle] = useState('');
-  const [newMeetingPriority, setNewMeetingPriority] = useState<'Low' | 'Medium' | 'High'>('High');
-  const [meetingSelectedDate, setMeetingSelectedDate] = useState<Date | undefined>(new Date());
-  const [openMeetingDatePicker, setOpenMeetingDatePicker] = useState(false);
-
-  // Convert sheet states
-  const { addContact } = useCRM();
-  const [createDealChecked, setCreateDealChecked] = useState(true);
-  const [convertDealName, setConvertDealName] = useState('');
-  const [convertDealAmount, setConvertDealAmount] = useState(25000);
-  const [convertDealStage, setConvertDealStage] = useState<DealStage>('Lead In');
-
-  React.useEffect(() => {
-    if (lead) {
-      setConvertDealName(`${lead.name} Deal Proposal`);
-      setConvertDealAmount(lead.dealValue || 25000);
-    }
-  }, [lead]);
-
-  // Initialize and get timeline notes history
-  const rawHistory: Array<{ id: string; content: string; date: string; author: string }> = (lead as any).notes_history || [];
-  const notesHistory = React.useMemo(() => {
-    if (rawHistory.length === 0 && lead.notes) {
-      // Seed default notes into history if history is empty
-      return [{
-        id: 'INIT-NOTE',
-        content: lead.notes,
-        date: lead.createdAt,
-        author: lead.assignedTo || 'System Automated'
-      }];
-    }
-    return rawHistory;
-  }, [rawHistory, lead.notes, lead.createdAt, lead.assignedTo]);
-
-  // Filter tasks linked specifically to this Lead
-  const relatedTasks = tasks.filter(t => t.relatedToType === 'Lead' && t.relatedToName === lead.name);
-
-  // Status mapping progress config
-  const getStatusProgress = (status: LeadStatus) => {
-    switch (status) {
-      case 'New': return { percent: 15, color: 'bg-slate-400', banner: 'bg-slate-50 border-slate-200 text-slate-800', txt: 'Pipeline Init: Qualified Profiling Stage' };
-      case 'Contacted': return { percent: 40, color: 'bg-blue-500', banner: 'bg-blue-50 border-blue-200 text-blue-800', txt: 'Initial Sourcing Engagement Achieved' };
-      case 'Working': return { percent: 60, color: 'bg-indigo-500', banner: 'bg-indigo-50 border-indigo-200 text-indigo-800', txt: 'Active Operational Dialogue & Scribing Proposal' };
-      case 'Qualified': return { percent: 85, color: 'bg-emerald-500', banner: 'bg-emerald-50 border-emerald-200 text-emerald-800', txt: 'Enterprise Pre-Offer Validation Confirmed' };
-      case 'Nurturing': return { percent: 70, color: 'bg-fuchsia-500', banner: 'bg-fuchsia-50 border-fuchsia-200 text-fuchsia-800', txt: 'Strategic High-Touch Long Term Cultivation' };
-      case 'Unqualified': return { percent: 100, color: 'bg-red-500', banner: 'bg-rose-50 border-rose-200 text-rose-800', txt: 'Disqualified / Pipeline Closed File' };
-      default: return { percent: 0, color: 'bg-gray-300', banner: 'bg-gray-50 border-gray-200 text-gray-800', txt: 'Unknown Status Tracker Code' };
-    }
+  // Callback to persist profile mutations
+  const handleProfileSave = (updatedFields: any) => {
+    onUpdateLead(lead.id, updatedFields);
+    setShowEditSheet(false);
+    alert('Lead details updated successfully.');
   };
 
-  const statusProgress = getStatusProgress(lead.status);
-
-  // Handle saving new note CRUD
-  const handleAddNoteSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newNoteContent.trim()) return;
-
-    const newNote = {
+  // Timeline note CRUD callbacks
+  const handleAddNote = (content: string) => {
+    const entry = {
       id: `NOTE-${Date.now()}`,
-      content: newNoteContent,
+      content,
       date: new Date().toISOString(),
       author: 'Sarah Jenkins' // Default user
     };
-
-    const updatedHistory = [newNote, ...notesHistory];
     onUpdateLead(lead.id, {
-      notes: newNoteContent, // save last note
-      notes_history: updatedHistory as any
+      notes: content,
+      notes_history: [entry, ...notesHistory] as any
     });
-    setNewNoteContent('');
+    alert('Timeline note added successfully.');
   };
 
-  // handleDeleteNote CRUD
+  const handleSaveEditedNote = (id: string, content: string) => {
+    const updated = notesHistory.map(note => 
+      note.id === id ? { ...note, content, date: new Date().toISOString() } : note
+    );
+    onUpdateLead(lead.id, {
+      notes_history: updated as any,
+      notes: updated[0]?.content || ''
+    });
+    alert('Timeline note entry modified.');
+  };
+
   const handleDeleteNote = (id: string) => {
-    if (confirm('Are you sure you want to delete this strategic note?')) {
-      const updatedHistory = notesHistory.filter(n => n.id !== id);
-      const lastNote = updatedHistory[0]?.content || '';
-      onUpdateLead(lead.id, {
-        notes: lastNote,
-        notes_history: updatedHistory as any
+    const filtered = notesHistory.filter(n => n.id !== id);
+    onUpdateLead(lead.id, {
+      notes_history: filtered as any,
+      notes: filtered[0]?.content || ''
+    });
+    alert('Timeline note entry removed.');
+  };
+
+  const handleSendEmail = (subject: string, body: string) => {
+    onUpdateLead(lead.id, {
+      lastActivity: `Sent email regarding: "${subject}"`
+    });
+    alert(`Outbound message sent to <${lead.email}>.`);
+  };
+
+  const handleConvertLead = (dealPayload: any | null) => {
+    // 1. Add contact to contacts directory
+    addContact({
+      name: lead.name,
+      firstName: lead.firstName || lead.name.split(' ')[0] || '',
+      lastName: lead.lastName || lead.name.split(' ').slice(1).join(' ') || '',
+      company: lead.company,
+      email: lead.email,
+      phone: lead.phone,
+      source: lead.source,
+      assignedTo: lead.assignedTo,
+      notes: lead.notes || 'Converted from Lead.',
+      companyWebsite: (lead as any).companyWebsite || '',
+      facebook: (lead as any).facebook || '',
+      emailOptOut: (lead as any).emailOptOut || false,
+      priority: lead.priority || 'Medium',
+      addressInfo: lead.addressInfo || {},
+      dealValue: lead.dealValue,
+      notes_history: notesHistory
+    });
+
+    // 2. Add deal opportunity (if dealPayload exists)
+    if (dealPayload) {
+      onAddDeal({
+        title: dealPayload.title,
+        company: lead.company,
+        value: dealPayload.value,
+        stage: dealPayload.stage,
+        status: 'Open',
+        contactPerson: lead.name,
+        email: lead.email,
+        phone: lead.phone,
+        expectedCloseDate: '2026-06-30',
+        assignedTo: dealPayload.assignedTo,
       });
     }
-  };
 
-  // handleEditNote save CRUD
-  const handleSaveEditNote = (id: string) => {
-    if (!editNotesText.trim()) return;
-    const updatedHistory = notesHistory.map(n => {
-      if (n.id === id) {
-        return { ...n, content: editNotesText, date: new Date().toISOString() };
-      }
-      return n;
-    });
-    onUpdateLead(lead.id, {
-      notes_history: updatedHistory as any
-    });
-    setEditNotesId(null);
-    setEditNotesText('');
-  };
-
-  // Handle scheduling new followup action CRUD
-  const handleAddFollowupSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newFollowupTitle.trim()) return;
-
-    const formattedDate = selectedDate ? selectedDate.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-
-    onAddTask({
-      title: newFollowupTitle,
-      dueDate: formattedDate,
-      priority: newFollowupPriority,
-      status: 'Pending',
-      assignedTo: lead.assignedTo || 'Sarah Jenkins',
-      category: newFollowupCategory,
-      relatedToType: 'Lead',
-      relatedToName: lead.name
-    });
-
-    setNewFollowupTitle('');
-    setNewFollowupPriority('Medium');
-    setNewFollowupCategory('Follow-up');
-    alert(`Scheduled follow-up action booked under "${formattedDate}".`);
+    // 3. Mark lead as Qualified
+    onUpdateLead(lead.id, { status: 'Qualified' });
+    
+    alert(`Successfully converted Lead "${lead.name}" into Contact & Qualified Account.`);
+    onBack();
   };
 
   return (
-    <div id="lead-details-viewport" className="space-y-6">
+    <div id="lead-details-viewport" className="space-y-6 max-w-7xl mx-auto p-4 md:p-6 pb-20">
       
       {/* 1. Header & Navigation Command Box */}
       <div className="flex flex-col md:flex-row md:items-center justify-between space-y-3 md:space-y-0 pb-2">
         <div className="flex items-center space-x-3.5">
-          <button
-            id="btn-lead-detail-back"
+          <Button
+            variant="outline"
             onClick={onBack}
-            className="p-2 cursor-pointer bg-white hover:bg-slate-100 text-slate-700 rounded-md border border-[#E5E7EB] transition-colors flex items-center justify-center shadow-xs"
-            title="Return to operational lead accounts list"
+            className="p-2 cursor-pointer bg-white hover:bg-slate-100 text-slate-700 rounded-md border border-[#E5E7EB] transition-colors flex items-center justify-center shadow-xs h-9 w-9"
           >
             <ArrowLeft className="h-4.5 w-4.5" />
-          </button>
+          </Button>
           <div>
             <div className="flex items-center space-x-2">
               <h1 className="text-2xl font-bold text-[#111827] tracking-tight">{lead.name}</h1>
@@ -273,15 +215,15 @@ export default function LeadDetailsView({
           </div>
         </div>
 
-        {/* Dynamic Action Controls for CRM Lead Status and Top Actions */}
-        <div className="flex flex-wrap items-center gap-3">
+        {/* Dynamic Action Controls for CRM Lead Status */}
+        <div className="flex flex-wrap items-center gap-3 select-none">
           <div className="flex items-center space-x-2">
-            <span className="text-xs text-slate-500 font-medium select-none">Pipeline Status:</span>
+            <span className="text-xs text-slate-500 font-medium">Pipeline Status:</span>
             <FormSelect
               id="lead-detail-status-direct"
               value={lead.status}
               onChange={(val) => {
-                onUpdateLead(lead.id, { status: val as LeadStatus });
+                onUpdateLead(lead.id, { status: val as any });
               }}
               options={[
                 { value: 'New', label: 'New' },
@@ -297,37 +239,16 @@ export default function LeadDetailsView({
 
           <div className="hidden sm:block h-6 w-[1.5px] bg-[#E5E7EB]" />
 
-          {/* TOP BUTTONS: Edit lead */}
+          {/* Edit lead button */}
           <Button
             type="button"
-            onClick={() => {
-              // Pre-populate actual current values
-              setEditFirstName(lead.firstName || lead.name.split(' ')[0] || '');
-              setEditLastName(lead.lastName || lead.name.split(' ').slice(1).join(' ') || '');
-              setEditCompany(lead.company || '');
-              setEditEmail(lead.email || '');
-              setEditPhone(lead.phone || '');
-              setEditStatus(lead.status || 'New');
-              setEditSource(lead.source || 'Website');
-              setEditPriority(lead.priority || 'Medium');
-              setEditWebsite((lead as any).companyWebsite || (lead as any).website || '');
-              setEditFacebook((lead as any).facebook || '');
-              setEditEmailOptOut(!!(lead as any).emailOptOut);
-              setEditStreet(lead.addressInfo?.street || '');
-              setEditCity(lead.addressInfo?.city || '');
-              setEditState(lead.addressInfo?.state || '');
-              setEditPostalCode(lead.addressInfo?.postalCode || '');
-              setEditCountry(lead.addressInfo?.country || '');
-              setEditAssignedTo(lead.assignedTo || 'Sarah Jenkins');
-              setEditNotes(lead.notes || '');
-              setShowEditSheet(true);
-            }}
+            onClick={() => setShowEditSheet(true)}
             className="h-9 px-3.5 border border-[#D1D5DB] text-xs font-semibold text-[#374151] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer flex items-center gap-1.5"
           >
             Edit
           </Button>
 
-          {/* Convert Lead to Opportunity */}
+          {/* Convert Lead to Contact */}
           <Button
             type="button"
             onClick={() => setShowConvertSheet(true)}
@@ -337,7 +258,7 @@ export default function LeadDetailsView({
             Convert
           </Button>
 
-          {/* 3-Dot Popover Menu (Send Mail option) */}
+          {/* More Action Menu */}
           <Popover>
             <PopoverTrigger asChild>
               <Button
@@ -366,1290 +287,63 @@ export default function LeadDetailsView({
       </div>
 
       {/* 2. Pipeline Progress Block Tracker */}
-      <Card className="bg-white border border-[#E5E7EB] rounded-[8px] overflow-hidden">
-        <div className="p-4 bg-[#F8FAFC] border-b border-[#E5E7EB] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-          <div className="flex items-center space-x-2">
-            <span className={`px-2 py-0.5 border rounded-[4px] text-xs font-semibold ${statusProgress.banner}`}>
-              {lead.status}
-            </span>
-            <span className="text-xs font-semibold text-slate-700">{statusProgress.txt}</span>
-          </div>
-          <span className="text-xs font-bold text-[#2563EB] bg-[#EFF6FF] px-2 py-1 rounded">
-            Stage Integrity {statusProgress.percent}%
-          </span>
-        </div>
-        <div className="p-4 bg-white">
-          <div className="w-full bg-[#E5E7EB] h-2.5 rounded-full overflow-hidden">
-            <div 
-              className={`h-full ${statusProgress.color} transition-all duration-300 ease-out`}
-              style={{ width: `${statusProgress.percent}%` }}
-            />
-          </div>
-          <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-2">
-            <span>INIT (15%)</span>
-            <span>ENGAGED (40%)</span>
-            <span>ACTIVE OPS (60%)</span>
-            <span>NURTURE (70%)</span>
-            <span>QUALIFIED (85%)</span>
-            <span>CLOSED (100%)</span>
-          </div>
-        </div>
-      </Card>
+      <CRMProgressBanner value={lead.status} type="status" />
 
       {/* 3. Core Split Panel Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* LEFT COLUMN: Lead Profile & Details Info Cards (1/3) */}
         <div className="space-y-6">
-          <Card className="bg-white border border-[#E5E7EB] rounded-[8px] shadow-xs">
-            <CardHeader className="py-4 border-b border-[#F5F6F8]">
-              <CardTitle className="text-xs uppercase font-mono tracking-wider text-slate-500">
-                Account Demographics
-              </CardTitle>
-              <CardDescription className="text-[11px]">Primary operational touchpoints in CRM filesystem</CardDescription>
-            </CardHeader>
-            <CardContent className="p-4 space-y-4 text-xs">
-              
-              {/* Contact Information Elements */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 flex items-center gap-1">
-                    <Mail className="h-3.5 w-3.5" />
-                    Email
-                  </span>
-                  <a href={`mailto:${lead.email}`} className="font-semibold text-[#2563EB] hover:underline truncate max-w-[160px]">
-                    {lead.email}
-                  </a>
-                </div>
+          <CRMDemographicsCard 
+            entity={lead as any} 
+            onUpdateRepresentative={(val) => onUpdateLead(lead.id, { assignedTo: val })}
+            onUpdateDealValue={(val) => onUpdateLead(lead.id, { dealValue: val })}
+          />
 
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 flex items-center gap-1">
-                    <Phone className="h-3.5 w-3.5" />
-                    Phone
-                  </span>
-                  <span className="font-semibold text-slate-800">{lead.phone}</span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 flex items-center gap-1">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Lead Sourcing
-                  </span>
-                  <span className="font-mono bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
-                    {lead.source}
-                  </span>
-                </div>
-
-                {/* Company Website */}
-                {lead.companyWebsite && (
-                  <div className="flex items-center justify-between border-t border-slate-50 pt-2.5">
-                    <span className="text-slate-400 flex items-center gap-1">
-                      <Briefcase className="h-3.5 w-3.5 text-slate-400" />
-                      Website
-                    </span>
-                    <a 
-                      href={lead.companyWebsite.startsWith('http') ? lead.companyWebsite : `https://${lead.companyWebsite}`} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="font-semibold text-[#2563EB] hover:underline truncate max-w-[160px]"
-                    >
-                      {lead.companyWebsite.replace(/https?:\/\//, '')}
-                    </a>
-                  </div>
-                )}
-
-                {/* Facebook profile */}
-                {lead.facebook && (
-                  <div className="flex items-center justify-between border-t border-slate-50 pt-2.5">
-                    <span className="text-slate-400 flex items-center gap-1">
-                      <User className="h-3.5 w-3.5 text-blue-500" />
-                      Facebook
-                    </span>
-                    <a 
-                      href={lead.facebook.startsWith('http') ? lead.facebook : `https://${lead.facebook}`} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="font-semibold text-[#2563EB] hover:underline truncate max-w-[160px]"
-                    >
-                      View Profile
-                    </a>
-                  </div>
-                )}
-
-                {/* Email Opt Out */}
-                <div className="flex items-center justify-between border-t border-slate-50 pt-2.5">
-                  <span className="text-slate-400 flex items-center gap-1">
-                    <Mail className="h-3.5 w-3.5 text-slate-400" />
-                    Marketing Mail
-                  </span>
-                  {lead.emailOptOut ? (
-                    <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
-                      Opted Out
-                    </span>
-                  ) : (
-                    <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                      Subscribed
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between border-t border-slate-50 pt-2.5">
-                  <span className="text-slate-400 flex items-center gap-1">
-                    <User className="h-3.5 w-3.5" />
-                    Assigned Owner
-                  </span>
-                  <FormSelect
-                    value={lead.assignedTo}
-                    onChange={(val) => onUpdateLead(lead.id, { assignedTo: val })}
-                    options={CRM_USERS.map(u => ({ value: u.name, label: u.name }))}
-                    className="w-36 text-right font-semibold text-[#111827]"
-                  />
-                </div>
-              </div>
-
-              <div className="h-[1px] bg-slate-100 my-2" />
-
-              {/* Deal Valuation mutation form */}
-              <div className="space-y-2.5">
-                <label className="text-slate-400 flex items-center gap-1 text-[11px] uppercase tracking-wider font-mono">
-                  <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
-                  Calculated Deal Size (USD)
-                </label>
-                <div className="flex items-center space-x-1">
-                  <span className="text-slate-500 font-bold text-sm">$</span>
-                  <Input
-                    type="number"
-                    value={lead.dealValue}
-                    onChange={(e) => onUpdateLead(lead.id, { dealValue: Number(e.target.value) || 0 })}
-                    className="h-8 py-1 px-2 border border-[#E5E7EB] text-xs font-bold text-slate-800 bg-[#F9FAFB] rounded"
-                  />
-                </div>
-                <p className="text-[10px] text-slate-400 italic">Adjust lead value estimate to sync forecasting models.</p>
-              </div>
-
-              <div className="h-[1px] bg-slate-100 my-2" />
-
-              {/* Additional timestamps */}
-              <div className="text-[11px] text-slate-500 space-y-1 block leading-relaxed bg-[#F8FAFC] p-2 rounded">
-                <div>
-                  <span className="font-semibold">Registered:</span> {new Date(lead.createdAt).toLocaleDateString()} ({formatRelativeTime(lead.createdAt)})
-                </div>
-                <div>
-                  <span className="font-semibold">Last Audited:</span> {new Date(lead.lastActivity).toLocaleDateString()}
-                </div>
-              </div>
-
-            </CardContent>
-          </Card>
-
-          {/* Address Information Card */}
-          <Card className="bg-white border border-[#E5E7EB] rounded-[8px] shadow-xs">
-            <CardHeader className="py-4 border-b border-[#F5F6F8]">
-              <CardTitle className="text-xs uppercase font-mono tracking-wider text-slate-500 flex items-center gap-1.5 select-none">
-                <MapPin className="h-4 w-4 text-slate-500" />
-                Address Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 space-y-3.5 text-xs">
-              {lead.addressInfo?.street || lead.addressInfo?.city || lead.addressInfo?.state || lead.addressInfo?.postalCode || lead.addressInfo?.country ? (
-                <div className="space-y-3">
-                  {lead.addressInfo.street && (
-                    <div className="flex justify-between items-start gap-2 border-b border-slate-50 pb-2">
-                      <span className="text-slate-400">Street</span>
-                      <span className="font-semibold text-right text-slate-800 break-words max-w-[160px]">
-                        {lead.addressInfo.street}
-                      </span>
-                    </div>
-                  )}
-                  {lead.addressInfo.city && (
-                    <div className="flex justify-between items-center gap-2 border-b border-slate-50 pb-2">
-                      <span className="text-slate-400">City</span>
-                      <span className="font-semibold text-right text-slate-800">
-                        {lead.addressInfo.city}
-                      </span>
-                    </div>
-                  )}
-                  {lead.addressInfo.state && (
-                    <div className="flex justify-between items-center gap-2 border-b border-slate-50 pb-2">
-                      <span className="text-slate-400">State / Province</span>
-                      <span className="font-semibold text-right text-slate-800">
-                        {lead.addressInfo.state}
-                      </span>
-                    </div>
-                  )}
-                  {lead.addressInfo.postalCode && (
-                    <div className="flex justify-between items-center gap-2 border-b border-[#E5E7EB] pb-2">
-                      <span className="text-slate-400">Postal Code</span>
-                      <span className="font-semibold text-right text-slate-800 font-mono">
-                        {lead.addressInfo.postalCode}
-                      </span>
-                    </div>
-                  )}
-                  {lead.addressInfo.country && (
-                    <div className="flex justify-between items-center gap-2">
-                      <span className="text-slate-400">Country</span>
-                      <span className="font-semibold text-right text-[#111827]">
-                        {lead.addressInfo.country}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="text-center text-slate-400 py-3 italic select-none">
-                  No address information loaded for this lead file.
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <CRMAddressCard addressInfo={lead.addressInfo} />
         </div>
 
-        {/* RIGHT COLUMN: Interaction Timeline Stream & Followups List (2/3) */}
-        <div className="lg:col-span-2 space-y-6">
-          
-          {/* UBIQUITOUS TABS PANEL */}
-          <Card className="bg-white border border-[#E5E7EB] rounded-[8px] overflow-hidden">
-            <CardHeader className="py-2.5 px-4 border-b border-[#E5E7EB] bg-[#F8FAFC]">
-              <div className="flex border-b border-transparent -mb-[11px] space-x-1">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('notes')}
-                  className={`px-4 py-2 font-semibold text-xs tracking-wide transition-all border-b-2 -mb-[1px] select-none cursor-pointer ${
-                    activeTab === 'notes'
-                      ? 'border-[#2563EB] text-[#2563EB] bg-white rounded-t-md font-bold'
-                      : 'border-transparent text-slate-500 hover:text-slate-850'
-                  }`}
-                >
-                  Notes & Internal Memos
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('followup')}
-                  className={`px-4 py-2 font-semibold text-xs tracking-wide transition-all border-b-2 -mb-[1px] select-none cursor-pointer ${
-                    activeTab === 'followup'
-                      ? 'border-[#2563EB] text-[#2563EB] bg-white rounded-t-md font-bold'
-                      : 'border-transparent text-slate-500 hover:text-slate-855'
-                  }`}
-                >
-                  Follow-ups
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('meeting')}
-                  className={`px-4 py-2 font-semibold text-xs tracking-wide transition-all border-b-2 -mb-[1px] select-none cursor-pointer ${
-                    activeTab === 'meeting'
-                      ? 'border-[#2563EB] text-[#2563EB] bg-white rounded-t-md font-bold'
-                      : 'border-transparent text-slate-500 hover:text-slate-855'
-                  }`}
-                >
-                  Meetings
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent className="p-5 space-y-5 select-none text-xs">
-              
-              {activeTab === 'notes' && (
-                <div className="space-y-4">
-                  {/* Note Submission Form */}
-                  <form onSubmit={handleAddNoteSubmit} className="space-y-2 pb-2">
-                    <Textarea
-                      placeholder="Record call summary notes, business insights, pricing context..."
-                      value={newNoteContent}
-                      onChange={(e) => setNewNoteContent(e.target.value)}
-                      className="w-full text-xs min-h-[75px] border-[#E5E7EB] focus:ring-1 focus:ring-blue-500 rounded p-2 outline-none bg-slate-50"
-                    />
-                    <div className="flex justify-end">
-                      <Button 
-                        type="submit" 
-                        disabled={!newNoteContent.trim()}
-                        className="h-8.5 px-3.5 bg-slate-800 hover:bg-slate-900 text-white font-medium text-xs rounded transition-colors flex items-center gap-1 cursor-pointer"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        Append Note
-                      </Button>
-                    </div>
-                  </form>
-
-                  <div className="h-[1px] bg-slate-100 my-2" />
-
-                  {/* Note Timeline Output */}
-                  <div className="space-y-4 max-h-[300px] overflow-y-auto crm-scrollbar pr-1">
-                    {notesHistory.length === 0 ? (
-                      <p className="text-xs text-slate-500 text-center py-4 italic">No timeline entries found. Start by lodging a note.</p>
-                    ) : (
-                      notesHistory.map((note) => (
-                        <div 
-                          key={note.id} 
-                          className="border-l-2 border-[#2563EB] pl-3.5 py-1.5 space-y-1 hover:bg-slate-50/50 rounded-r-md transition-colors relative group"
-                        >
-                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-[11px] text-[#6B7280]">
-                            <span className="font-semibold text-slate-700">{note.author}</span>
-                            <span>{new Date(note.date).toLocaleString()}</span>
-                          </div>
-
-                          {editNotesId === note.id ? (
-                            <div className="space-y-2 mt-1">
-                              <Textarea
-                                value={editNotesText}
-                                onChange={(e) => setEditNotesText(e.target.value)}
-                                className="w-full text-xs p-1.5 border border-[#2563EB]"
-                              />
-                              <div className="flex justify-end space-x-1.5">
-                                <Button 
-                                  size="sm" 
-                                  onClick={() => setEditNotesId(null)}
-                                  className="h-7 px-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px]"
-                                >
-                                  Cancel
-                                </Button>
-                                <Button 
-                                  size="sm" 
-                                  onClick={() => handleSaveEditNote(note.id)}
-                                  className="h-7 px-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-[10px]"
-                                >
-                                  Save Checkpoint
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-slate-800 font-normal leading-relaxed">{note.content}</p>
-                          )}
-
-                          {/* CRUD controls for Notes */}
-                          {editNotesId !== note.id && (
-                            <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute top-1 right-2 flex items-center space-x-1">
-                              <button
-                                onClick={() => {
-                                  setEditNotesId(note.id);
-                                  setEditNotesText(note.content);
-                                }}
-                                className="p-1 hover:bg-slate-100 text-blue-600 rounded text-[10px] cursor-pointer"
-                                title="Edit strategic note entry"
-                              >
-                                Edit
-                              </button>
-                              {note.id !== 'INIT-NOTE' && (
-                                <button
-                                  onClick={() => handleDeleteNote(note.id)}
-                                  className="p-1 hover:bg-slate-100 text-red-500 rounded cursor-pointer"
-                                  title="Delete note permanently"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'followup' && (
-                <div className="space-y-5">
-                  {/* Add Followup scheduling component */}
-                  <form onSubmit={handleAddFollowupSubmit} className="space-y-4 bg-slate-50 p-4 border border-[#E5E7EB] rounded-lg">
-                    <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Schedule New Routine Follow-up Task</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                      
-                      {/* Title */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-medium text-slate-500 uppercase">Follow-up Title / Agenda</label>
-                        <Input
-                          type="text"
-                          placeholder="e.g. Present RFP feedback"
-                          value={newFollowupTitle}
-                          onChange={(e) => setNewFollowupTitle(e.target.value)}
-                          className="h-9 text-xs bg-white border border-[#E5E7EB] pb-1.5 pt-1.5"
-                        />
-                      </div>
-
-                      {/* Priority */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-medium text-slate-500 uppercase select-none">Booking Priority</label>
-                        <FormSelect
-                          value={newFollowupPriority}
-                          onChange={(val) => setNewFollowupPriority(val as any)}
-                          options={[
-                            { value: 'Low', label: 'Low Priority' },
-                            { value: 'Medium', label: 'Medium Priority' },
-                            { value: 'High', label: 'High Priority' }
-                          ]}
-                        />
-                      </div>
-
-                      {/* Category */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-medium text-slate-500 uppercase select-none font-semibold">Operational Category</label>
-                        <FormSelect
-                          value={newFollowupCategory}
-                          onChange={(val) => setNewFollowupCategory(val as any)}
-                          options={[
-                            { value: 'Follow-up', label: 'Follow-up Dialogue' },
-                            { value: 'Call', label: 'Direct Outbound Call' },
-                            { value: 'Email', label: 'Email Communication' },
-                            { value: 'Proposal', label: 'Contract Draft Delivery' }
-                          ]}
-                        />
-                      </div>
-
-                      {/* Date - Calendar Picker Inside Popover */}
-                      <div className="space-y-1 flex flex-col">
-                        <label className="text-[10px] font-medium text-slate-500 uppercase">Due Date Selector</label>
-                        <Popover open={openDatePicker} onOpenChange={setOpenDatePicker}>
-                          <PopoverTrigger asChild>
-                            <Button
-                              id="lead-date-picker-trigger"
-                              variant="outline"
-                              type="button"
-                              className="h-9 px-3 bg-white border border-[#E5E7EB] text-xs hover:bg-[#F3F4F6] text-slate-700 flex justify-between items-center text-left w-full rounded"
-                            >
-                              <span className="truncate">
-                                {selectedDate ? selectedDate.toLocaleDateString() : 'Choose Deadline'}
-                              </span>
-                              <CalendarIcon className="h-4 w-4 ml-1 text-[#6B7280]" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0 bg-white shadow-lg border border-[#E5E7EB] z-50">
-                            <Calendar
-                              mode="single"
-                              selected={selectedDate}
-                              onSelect={(date) => {
-                                setSelectedDate(date);
-                                setOpenDatePicker(false);
-                              }}
-                            />
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-
-                    </div>
-
-                    <div className="flex justify-end pt-2">
-                      <Button
-                        type="submit"
-                        disabled={!newFollowupTitle.trim()}
-                        className="h-8.5 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded cursor-pointer transition-colors"
-                      >
-                        Schedule Follow-up
-                      </Button>
-                    </div>
-                  </form>
-
-                  {/* Scheduled Agenda Items Checklist */}
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-bold text-slate-700 uppercase tracking-widest">Active Follow-ups Checklist</h3>
-                    {relatedTasks.filter(t => t.category !== 'Meeting').length === 0 ? (
-                      <p className="text-xs text-slate-500 bg-slate-50 p-3.5 rounded text-center italic">No pending follow-ups scheduled for this executive profile.</p>
-                    ) : (
-                      <div className="divide-y divide-slate-100 border border-[#E5E7EB] rounded bg-white overflow-hidden text-xs">
-                        {relatedTasks.filter(t => t.category !== 'Meeting').map((t) => (
-                          <div 
-                            key={t.id} 
-                            className={`flex justify-between items-center p-3 transition-colors ${
-                              t.status === 'Completed' ? 'bg-slate-50/50' : 'bg-white'
-                            }`}
-                          >
-                            <div className="flex items-center space-x-3.5">
-                              {/* Checked Checkbox vs Unchecked */}
-                              <button
-                                type="button"
-                                onClick={() => onToggleTask(t.id)}
-                                className="text-slate-500 hover:text-[#2563EB] transition-colors cursor-pointer"
-                                title={t.status === 'Completed' ? 'Mark Task Pending' : 'Mark Task Completed'}
-                              >
-                                {t.status === 'Completed' ? (
-                                  <CheckSquare className="h-4.5 w-4.5 text-emerald-600 font-bold" />
-                                ) : (
-                                  <Square className="h-4.5 w-4.5 text-slate-400" />
-                                )}
-                              </button>
-                              
-                              <div>
-                                <span className={`font-semibold text-slate-800 ${t.status === 'Completed' ? 'line-through text-slate-400' : ''}`}>
-                                  {t.title}
-                                </span>
-                                <div className="flex items-center space-x-2.5 text-[10px] text-slate-400 mt-1 font-mono">
-                                  <span className="bg-slate-100 text-slate-600 px-1 rounded uppercase tracking-wider">{t.category}</span>
-                                  <span className="flex items-center gap-0.5">
-                                    <CalendarIcon className="h-3 w-3" />
-                                    {t.dueDate}
-                                  </span>
-                                  <span>•</span>
-                                  <span className={`font-semibold ${
-                                    t.priority === 'High' ? 'text-red-500' : t.priority === 'Medium' ? 'text-amber-500' : 'text-blue-500'
-                                  }`}>
-                                    {t.priority}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* PURGE BUTTON */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (confirm(`Do you wish to delete follow-up: "${t.title}"?`)) {
-                                  onDeleteTask(t.id);
-                                }
-                              }}
-                              className="p-1 hover:bg-slate-100 text-stone-400 hover:text-red-500 rounded cursor-pointer"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'meeting' && (
-                <div className="space-y-5">
-                  {/* Add Meeting scheduling component */}
-                  <form 
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (!newMeetingTitle.trim()) return;
-                      const formattedDate = meetingSelectedDate ? meetingSelectedDate.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-                      onAddTask({
-                        title: newMeetingTitle,
-                        dueDate: formattedDate,
-                        priority: newMeetingPriority,
-                        status: 'Pending',
-                        assignedTo: lead.assignedTo || 'Sarah Jenkins',
-                        category: 'Meeting',
-                        relatedToType: 'Lead',
-                        relatedToName: lead.name
-                      });
-                      setNewMeetingTitle('');
-                      setNewMeetingPriority('High');
-                      alert(`Scheduled meeting booked under "${formattedDate}".`);
-                    }} 
-                    className="space-y-4 bg-slate-50 p-4 border border-[#E5E7EB] rounded-lg"
-                  >
-                    <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Schedule New Sync Meeting</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                      
-                      {/* Title */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-medium text-slate-500 uppercase">Meeting Subject / Agenda</label>
-                        <Input
-                          type="text"
-                          placeholder="e.g. Discuss Q3 roadmap"
-                          value={newMeetingTitle}
-                          onChange={(e) => setNewMeetingTitle(e.target.value)}
-                          className="h-9 text-xs bg-white border border-[#E5E7EB] pb-1.5 pt-1.5"
-                        />
-                      </div>
-
-                      {/* Priority */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-medium text-slate-500 uppercase select-none">Meeting Priority</label>
-                        <FormSelect
-                          value={newMeetingPriority}
-                          onChange={(val) => setNewMeetingPriority(val as any)}
-                          options={[
-                            { value: 'Low', label: 'Low Priority' },
-                            { value: 'Medium', label: 'Medium Priority' },
-                            { value: 'High', label: 'High Priority' }
-                          ]}
-                        />
-                      </div>
-
-                      {/* Date - Calendar Picker Inside Popover */}
-                      <div className="space-y-1 flex flex-col">
-                        <label className="text-[10px] font-medium text-slate-500 uppercase">Meeting Date Selector</label>
-                        <Popover open={openMeetingDatePicker} onOpenChange={setOpenMeetingDatePicker}>
-                          <PopoverTrigger asChild>
-                            <Button
-                              id="meeting-date-picker-trigger"
-                              variant="outline"
-                              type="button"
-                              className="h-9 px-3 bg-white border border-[#E5E7EB] text-xs hover:bg-[#F3F4F6] text-slate-700 flex justify-between items-center text-left w-full rounded"
-                            >
-                              <span className="truncate">
-                                {meetingSelectedDate ? meetingSelectedDate.toLocaleDateString() : 'Choose Date'}
-                              </span>
-                              <CalendarIcon className="h-4 w-4 ml-1 text-[#6B7280]" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0 bg-white shadow-lg border border-[#E5E7EB] z-50">
-                            <Calendar
-                              mode="single"
-                              selected={meetingSelectedDate}
-                              onSelect={(date) => {
-                                setMeetingSelectedDate(date);
-                                setOpenMeetingDatePicker(false);
-                              }}
-                            />
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-
-                    </div>
-
-                    <div className="flex justify-end pt-2">
-                      <Button
-                        type="submit"
-                        disabled={!newMeetingTitle.trim()}
-                        className="h-8.5 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded cursor-pointer transition-colors"
-                      >
-                        Schedule Meeting
-                      </Button>
-                    </div>
-                  </form>
-
-                  {/* Scheduled Agenda Items Checklist */}
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-bold text-slate-700 uppercase tracking-widest">Active Meetings Scheduled</h3>
-                    {relatedTasks.filter(t => t.category === 'Meeting').length === 0 ? (
-                      <p className="text-xs text-slate-500 bg-slate-50 p-3.5 rounded text-center italic">No upcoming sync meetings booked for this entity profile.</p>
-                    ) : (
-                      <div className="divide-y divide-slate-100 border border-[#E5E7EB] rounded bg-white overflow-hidden text-xs">
-                        {relatedTasks.filter(t => t.category === 'Meeting').map((t) => (
-                          <div 
-                            key={t.id} 
-                            className={`flex justify-between items-center p-3 transition-colors ${
-                              t.status === 'Completed' ? 'bg-slate-50/50' : 'bg-white'
-                            }`}
-                          >
-                            <div className="flex items-center space-x-3.5">
-                              {/* Checked Checkbox vs Unchecked */}
-                              <button
-                                type="button"
-                                onClick={() => onToggleTask(t.id)}
-                                className="text-slate-500 hover:text-[#2563EB] transition-colors cursor-pointer"
-                                title={t.status === 'Completed' ? 'Mark Meeting Done' : 'Mark Meeting Pending'}
-                              >
-                                {t.status === 'Completed' ? (
-                                  <CheckSquare className="h-4.5 w-4.5 text-emerald-600 font-bold" />
-                                ) : (
-                                  <Square className="h-4.5 w-4.5 text-slate-400" />
-                                )}
-                              </button>
-                              
-                              <div>
-                                <span className={`font-semibold text-slate-800 ${t.status === 'Completed' ? 'line-through text-slate-400' : ''}`}>
-                                  {t.title}
-                                </span>
-                                <div className="flex items-center space-x-2.5 text-[10px] text-slate-400 mt-1 font-mono">
-                                  <span className="bg-slate-100 text-slate-600 px-1 rounded uppercase tracking-wider">{t.category}</span>
-                                  <span className="flex items-center gap-0.5">
-                                    <CalendarIcon className="h-3 w-3" />
-                                    {t.dueDate}
-                                  </span>
-                                  <span>•</span>
-                                  <span className={`font-semibold ${
-                                    t.priority === 'High' ? 'text-red-500' : t.priority === 'Medium' ? 'text-amber-500' : 'text-blue-500'
-                                  }`}>
-                                    {t.priority}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* PURGE BUTTON */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (confirm(`Do you wish to delete meeting: "${t.title}"?`)) {
-                                  onDeleteTask(t.id);
-                                }
-                              }}
-                              className="p-1 hover:bg-slate-100 text-stone-400 hover:text-red-500 rounded cursor-pointer"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-            </CardContent>
-          </Card>
-
+        {/* RIGHT COLUMN: Timeline Notes & Followups Checklist (2/3) */}
+        <div className="lg:col-span-2">
+          <CRMInteractionTabs 
+            relatedName={lead.name}
+            assignedTo={lead.assignedTo}
+            notesHistory={notesHistory}
+            relatedTasks={relatedTasks}
+            onAddNote={handleAddNote}
+            onDeleteNote={handleDeleteNote}
+            onSaveEditedNote={handleSaveEditedNote}
+            onAddTask={onAddTask}
+            onToggleTask={onToggleTask}
+            onDeleteTask={onDeleteTask}
+          />
         </div>
-
       </div>
 
-      {/* 4. SHEET OVERLAYS FOR LEAD OPERATIONS */}
+      {/* Slide-out Sidebar sheets */}
+      <CRMEditEntitySheet 
+        open={showEditSheet}
+        onOpenChange={setShowEditSheet}
+        entityType="Lead"
+        entity={lead}
+        onSave={handleProfileSave}
+      />
 
-      {/* SIDE PANEL: EDIT CUSTOMER PROFILE */}
-      <Sheet open={showEditSheet} onOpenChange={setShowEditSheet}>
-        <SheetContent side="right" className="w-full sm:max-w-xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-50">
-          <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] bg-[#F5F6F8]">
-            <SheetTitle className="font-semibold text-[#111827] text-[15px]">
-              Edit Customer Profile Settings
-            </SheetTitle>
-            <p className="text-[10px] text-[#6B7280] font-mono mt-0.5">
-              Ref ID / Identifier: {lead.id}
-            </p>
-          </SheetHeader>
+      <CRMOutboundEmailSheet 
+        open={showEmailSheet}
+        onOpenChange={setShowEmailSheet}
+        contactEmail={lead.email}
+        initialSubject={emailSubject}
+        initialBody={emailBody}
+        onSendEmail={handleSendEmail}
+      />
 
-          <div className="flex-1 overflow-y-auto p-5 space-y-5 crm-scrollbar text-xs">
-            {/* 1. Name section */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col space-y-1.5 w-full">
-                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                  First name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={editFirstName}
-                  onChange={(e) => setEditFirstName(e.target.value)}
-                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                  placeholder="e.g. Robert"
-                />
-              </div>
-
-              <div className="flex flex-col space-y-1.5 w-full">
-                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                  Last name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={editLastName}
-                  onChange={(e) => setEditLastName(e.target.value)}
-                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                  placeholder="e.g. Downey"
-                />
-              </div>
-            </div>
-
-            {/* 2. Company section */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col space-y-1.5 w-full">
-                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                  Company Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={editCompany}
-                  onChange={(e) => setEditCompany(e.target.value)}
-                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                  placeholder="e.g. Stark Industries"
-                />
-              </div>
-
-              <div className="flex flex-col space-y-1.5 w-full">
-                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                  Company Website URL
-                </label>
-                <input
-                  type="text"
-                  value={editWebsite}
-                  onChange={(e) => setEditWebsite(e.target.value)}
-                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                  placeholder="e.g. starkindustries.com"
-                />
-              </div>
-            </div>
-
-            {/* 3. Communication section */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col space-y-1.5 w-full">
-                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                  placeholder="robert@stark.com"
-                />
-              </div>
-
-              <div className="flex flex-col space-y-1.5 w-full">
-                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                  Phone Number
-                </label>
-                <input
-                  type="text"
-                  value={editPhone}
-                  onChange={(e) => setEditPhone(e.target.value)}
-                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                  placeholder="e.g. +1 (555) 019-2834"
-                />
-              </div>
-            </div>
-
-            {/* 4. Social Integration Profile & Email settings */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col space-y-1.5 w-full">
-                <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                  Facebook Profile URL
-                </label>
-                <input
-                  type="text"
-                  value={editFacebook}
-                  onChange={(e) => setEditFacebook(e.target.value)}
-                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                  placeholder="https://facebook.com/username"
-                />
-              </div>
-
-              <div className="flex flex-col justify-end pb-1">
-                <div className="flex items-center space-x-2.5 bg-slate-50 border border-slate-200 rounded-[6px] px-3 h-10">
-                  <input
-                    type="checkbox"
-                    id="edit-email-opt-out-cb-details"
-                    checked={editEmailOptOut}
-                    onChange={(e) => setEditEmailOptOut(e.target.checked)}
-                    className="rounded border-[#E5E7EB] text-[#2563EB] focus:ring-blue-500 h-4 w-4 cursor-pointer"
-                  />
-                  <label htmlFor="edit-email-opt-out-cb-details" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
-                    Opt-out Marketing
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            {/* 5. Address Details subsection */}
-            <div className="border border-slate-100 rounded-lg p-3.5 space-y-3 bg-[#F8FAFC]">
-              <h3 className="text-xs font-bold text-slate-600 uppercase tracking-widest flex items-center gap-1">
-                <MapPin className="h-3.5 w-3.5 text-slate-500" />
-                Address Geography Location
-              </h3>
-              
-              <div className="flex flex-col space-y-1.5 w-full">
-                <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                  Street Address
-                </label>
-                <input
-                  type="text"
-                  value={editStreet}
-                  onChange={(e) => setEditStreet(e.target.value)}
-                  className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                  placeholder="e.g. 10880 Malibu Point"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col space-y-1.5 w-full">
-                  <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                    City
-                  </label>
-                  <input
-                    type="text"
-                    value={editCity}
-                    onChange={(e) => setEditCity(e.target.value)}
-                    className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                    placeholder="e.g. Malibu"
-                  />
-                </div>
-
-                <div className="flex flex-col space-y-1.5 w-full">
-                  <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                    State / Province
-                  </label>
-                  <input
-                    type="text"
-                    value={editState}
-                    onChange={(e) => setEditState(e.target.value)}
-                    className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                    placeholder="e.g. CA"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col space-y-1.5 w-full">
-                  <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                    Postal Code
-                  </label>
-                  <input
-                    type="text"
-                    value={editPostalCode}
-                    onChange={(e) => setEditPostalCode(e.target.value)}
-                    className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                    placeholder="e.g. 90265"
-                  />
-                </div>
-
-                <div className="flex flex-col space-y-1.5 w-full">
-                  <label className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                    Country
-                  </label>
-                  <input
-                    type="text"
-                    value={editCountry}
-                    onChange={(e) => setEditCountry(e.target.value)}
-                    className="h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                    placeholder="e.g. United States"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 6. Classification options using FormSelect */}
-            <div className="grid grid-cols-4 gap-3">
-              <FormSelect
-                label="Status"
-                value={editStatus}
-                onChange={(val) => setEditStatus(val as LeadStatus)}
-                options={[
-                  { value: 'New', label: 'New' },
-                  { value: 'Contacted', label: 'Contacted' },
-                  { value: 'Working', label: 'Working' },
-                  { value: 'Qualified', label: 'Qualified' },
-                  { value: 'Nurturing', label: 'Nurturing' },
-                  { value: 'Unqualified', label: 'Unqualified' }
-                ]}
-              />
-
-              <FormSelect
-                label="Source Channel"
-                value={editSource}
-                onChange={(val) => setEditSource(val as LeadSource)}
-                options={[
-                  { value: 'Website', label: 'Website' },
-                  { value: 'Referral', label: 'Referral' },
-                  { value: 'Cold Call', label: 'Cold Call' },
-                  { value: 'Inbound', label: 'Inbound' },
-                  { value: 'LinkedIn', label: 'LinkedIn' },
-                  { value: 'Ad Campaign', label: 'Ad Campaign' },
-                  { value: 'Partnership', label: 'Partnership' }
-                ]}
-              />
-
-              <FormSelect
-                label="Account Handler"
-                value={editAssignedTo}
-                onChange={(val) => setEditAssignedTo(val)}
-                options={CRM_USERS.map(u => ({ value: u.name, label: u.name }))}
-              />
-
-              <FormSelect
-                label="Priority"
-                value={editPriority}
-                onChange={(val) => setEditPriority(val as any)}
-                options={[
-                  { value: 'Low', label: 'Low' },
-                  { value: 'Medium', label: 'Medium' },
-                  { value: 'High', label: 'High' }
-                ]}
-              />
-            </div>
-
-            {/* 7. Internal Notes section */}
-            <div className="flex flex-col space-y-1.5 w-full">
-              <label className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider select-none">
-                Internal notes & activity brief
-              </label>
-              <textarea
-                value={editNotes}
-                onChange={(e) => setEditNotes(e.target.value)}
-                className="px-3 py-2 bg-white border border-[#E5E7EB] rounded-[6px] text-xs text-[#111827] placeholder-[#9CA3AF] outline-none transition-colors selection:bg-[#2563EB]/10 w-full focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] min-h-[82px]"
-                placeholder="Insert any relevant context from calls, introductions..."
-                rows={3}
-              />
-            </div>
-          </div>
-
-          <div className="p-4 border-t border-[#E5E7EB] bg-[#F5F6F8] flex items-center justify-end gap-3 font-semibold">
-            <Button
-              type="button"
-              onClick={() => setShowEditSheet(false)}
-              className="h-9 px-4 border border-[#E5E7EB] text-xs text-[#374151] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                if (!editFirstName || !editLastName || !editCompany) {
-                  alert('First Name, Last Name and Company are required.');
-                  return;
-                }
-                onUpdateLead(lead.id, {
-                  firstName: editFirstName,
-                  lastName: editLastName,
-                  name: `${editFirstName} ${editLastName}`,
-                  company: editCompany,
-                  email: editEmail,
-                  phone: editPhone,
-                  status: editStatus,
-                  source: editSource,
-                  priority: editPriority,
-                  companyWebsite: editWebsite,
-                  facebook: editFacebook,
-                  emailOptOut: editEmailOptOut,
-                  assignedTo: editAssignedTo,
-                  notes: editNotes,
-                  addressInfo: {
-                    street: editStreet,
-                    city: editCity,
-                    state: editState,
-                    postalCode: editPostalCode,
-                    country: editCountry
-                  }
-                });
-                alert('Customer profile settings saved.');
-                setShowEditSheet(false);
-              }}
-              className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
-            >
-              Save Profile Settings
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* SIDE PANEL: CONVERT LEAD TO OPPORTUNITY */}
-      <Sheet open={showConvertSheet} onOpenChange={setShowConvertSheet}>
-        <SheetContent side="right" className="w-full sm:max-w-md bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-50">
-          <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] bg-[#F5F6F8]">
-            <SheetTitle className="font-semibold text-[#111827] text-[15px]">
-              Convert Lead Opportunity
-            </SheetTitle>
-            <p className="text-[10px] text-[#6B7280] font-mono mt-0.5">
-              Protocol: Lead Conversion
-            </p>
-          </SheetHeader>
-
-          <div className="flex-1 overflow-y-auto p-5 space-y-5 text-xs">
-            <div className="bg-[#EFF6FF] border border-[#BFDBFE] p-4 rounded-[6px] space-y-2">
-              <h4 className="font-semibold text-[#1E40AF] text-[13px]">Lead Profile Summary</h4>
-              <div className="grid grid-cols-2 gap-2 text-slate-700 font-sans mt-2">
-                <div>
-                  <span className="text-[10px] text-slate-400 block uppercase tracking-wider">Contact Name</span>
-                  <span className="font-bold text-[12px]">{lead.name}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 block uppercase tracking-wider">Company Name</span>
-                  <span className="font-bold text-[12px]">{lead.company}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-[#4B5563] leading-relaxed">
-                Converting this lead will automatically qualify the account profile, transition their record to the unified **Contacts Directory**, and optionally establish a business deal transaction.
-              </p>
-            </div>
-
-            {/* Checkbox selector */}
-            <div 
-              className="flex items-center space-x-2.5 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] hover:bg-slate-100/50 transition cursor-pointer select-none"
-              onClick={() => setCreateDealChecked(prev => !prev)}
-            >
-              <input
-                type="checkbox"
-                id="create-deal-checkbox"
-                checked={createDealChecked}
-                onChange={(e) => setCreateDealChecked(e.target.checked)}
-                onClick={(e) => e.stopPropagation()}
-                className="h-4 w-4 text-[#2563EB] border-[#CBD5E1] rounded focus:ring-[#2563EB] cursor-pointer"
-              />
-              <label htmlFor="create-deal-checkbox" className="font-semibold text-slate-700 cursor-pointer flex-1">
-                Create a new Deal for this lead
-              </label>
-            </div>
-
-            {/* Expandable Deal Fields */}
-            {createDealChecked && (
-              <div className="p-4 border border-blue-100 bg-[#EFF6FF]/20 rounded-[6px] space-y-4 animate-in fade-in slide-in-from-top-2 duration-150">
-                <span className="text-[10px] font-bold tracking-wider text-blue-700 uppercase">
-                  Deal Opportunity parameters
-                </span>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-slate-500">Deal Name</label>
-                  <Input
-                    type="text"
-                    value={convertDealName}
-                    onChange={(e) => setConvertDealName(e.target.value)}
-                    className="h-9 text-xs bg-white border-[#CBD5E1] rounded-[6px]"
-                    placeholder="Enter proposal name..."
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-slate-500">Amount ($)</label>
-                  <Input
-                    type="number"
-                    value={convertDealAmount}
-                    onChange={(e) => setConvertDealAmount(Number(e.target.value))}
-                    className="h-9 text-xs bg-white border-[#CBD5E1] rounded-[6px]"
-                    placeholder="25000"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-slate-500">Pipeline Stage</label>
-                  <FormSelect
-                    value={convertDealStage}
-                    onChange={(val) => setConvertDealStage(val as DealStage)}
-                    options={[
-                      { value: 'Lead In', label: 'Lead In' },
-                      { value: 'Contact Made', label: 'Contact Made' },
-                      { value: 'Demo Scheduled', label: 'Demo Scheduled' },
-                      { value: 'Proposal Sent', label: 'Proposal Sent' },
-                      { value: 'Negotiation', label: 'Negotiation' },
-                      { value: 'Won', label: 'Won' },
-                      { value: 'Lost', label: 'Lost' }
-                    ]}
-                    className="w-full text-xs font-semibold bg-white"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="p-4 border-t border-[#E5E7EB] bg-[#F5F6F8] flex items-center justify-end gap-3 font-semibold">
-            <Button
-              type="button"
-              onClick={() => setShowConvertSheet(false)}
-              className="h-9 px-4 border border-[#E5E7EB] text-xs text-[#374151] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                // 1. Advance lead stage to Qualified
-                onUpdateLead(lead.id, { status: 'Qualified' as LeadStatus });
-                
-                // 2. Register contact
-                addContact({
-                  name: lead.name,
-                  firstName: lead.firstName || lead.name.split(' ')[0],
-                  lastName: lead.lastName || lead.name.split(' ').slice(1).join(' '),
-                  company: lead.company,
-                  email: lead.email,
-                  phone: lead.phone,
-                  source: lead.source,
-                  assignedTo: lead.assignedTo || 'Sarah Jenkins',
-                  notes: lead.notes || 'Converted from Qualified Lead.',
-                  companyWebsite: (lead as any).companyWebsite || '',
-                  facebook: (lead as any).facebook || '',
-                  emailOptOut: !!(lead as any).emailOptOut,
-                  addressInfo: lead.addressInfo || {},
-                  priority: lead.priority || 'Medium',
-                  convertedFromLeadId: lead.id
-                });
-
-                // 3. Conditionally create active CRM Deal
-                if (createDealChecked) {
-                  onAddDeal({
-                    title: convertDealName || `${lead.company} Deal Proposal`,
-                    company: lead.company,
-                    contactPerson: lead.name,
-                    email: lead.email,
-                    phone: lead.phone,
-                    value: convertDealAmount || 25000,
-                    stage: convertDealStage || 'Lead In',
-                    status: (convertDealStage === 'Won' ? 'Won' : convertDealStage === 'Lost' ? 'Lost' : 'Open') as 'Open' | 'Won' | 'Lost',
-                    expectedCloseDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                    assignedTo: lead.assignedTo || 'Sarah Jenkins'
-                  });
-                }
-
-                alert(`Lead successfully converted to Contact! Checked unified CRM Contacts.`);
-                setShowConvertSheet(false);
-              }}
-              className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
-            >
-              Convert
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* SIDE PANEL: SEND OUTBOUND EMAIL */}
-      <Sheet open={showEmailSheet} onOpenChange={setShowEmailSheet}>
-        <SheetContent side="right" className="w-full sm:max-w-md bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-50">
-          <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] bg-[#F5F6F8]">
-            <SheetTitle className="font-semibold text-[#111827] text-[15px]">
-              Dispatch Corporate Email Message
-            </SheetTitle>
-            <p className="text-[10px] text-[#6B7280] font-mono mt-0.5">
-              Recipient: {lead.email}
-            </p>
-          </SheetHeader>
-
-          <div className="flex-1 overflow-y-auto p-5 space-y-4 crm-scrollbar text-xs">
-            <div>
-              <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
-                Recipient
-              </label>
-              <Input 
-                type="text" 
-                disabled 
-                value={lead.email} 
-                className="h-9 text-xs bg-slate-100 text-slate-500 cursor-not-allowed pb-1.5 pt-1.5" 
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none font-semibold">
-                Email Subject
-              </label>
-              <Input 
-                type="text" 
-                value={emailSubject} 
-                onChange={(e) => setEmailSubject(e.target.value)} 
-                className="h-9 text-xs bg-[#F5F6F8] pb-1.5 pt-1.5" 
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
-                Email Message Body
-              </label>
-              <Textarea 
-                rows={10} 
-                value={emailBody} 
-                onChange={(e) => setEmailBody(e.target.value)} 
-                className="w-full font-sans text-xs border border-[#E5E7EB] rounded-[6px] outline-none bg-[#F5F6F8] p-3 crm-scrollbar" 
-              />
-            </div>
-          </div>
-
-          <div className="p-4 border-t border-[#E5E7EB] bg-[#F5F6F8] flex items-center justify-end gap-3 font-semibold">
-            <Button
-              type="button"
-              onClick={() => setShowEmailSheet(false)}
-              className="h-9 px-4 border border-[#E5E7EB] text-xs text-[#374151] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                if (!emailSubject || !emailBody) {
-                  alert("Subject and Body are required.");
-                  return;
-                }
-                const currentHistory = notesHistory || [];
-                const emailNote = {
-                  id: `EMAIL-NOTE-${Date.now()}`,
-                  content: `[Outbound Email] Subject: "${emailSubject}"\n\n${emailBody}`,
-                  date: new Date().toISOString(),
-                  author: 'Sarah Jenkins'
-                };
-                const updatedHistory = [emailNote, ...currentHistory];
-                onUpdateLead(lead.id, {
-                  notes: `Outbound email: "${emailSubject}"`,
-                  notes_history: updatedHistory as any,
-                  lastActivity: `Sent corporate email regarding "${emailSubject}"`
-                });
-                alert(`Corporate email message sent successfully to ${lead.email}.`);
-                setShowEmailSheet(false);
-              }}
-              className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
-            >
-              Send Message
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
+      <CRMConvertLeadSheet 
+        open={showConvertSheet}
+        onOpenChange={setShowConvertSheet}
+        lead={lead}
+        onConvert={handleConvertLead}
+      />
 
     </div>
   );

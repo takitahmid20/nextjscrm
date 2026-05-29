@@ -41,6 +41,7 @@ import { FormInput, FormSelect, FormTextarea, FormCheckbox, FormDatePicker } fro
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useCRM } from '../context/CRMContext';
+import { UnifiedTable, UnifiedTableHeader } from './UnifiedTable';
 
 interface LeadsViewProps {
   leads: Lead[];
@@ -320,8 +321,82 @@ export default function LeadsView({
     }
   };
 
+  // Headers for UnifiedTable
+  const tableHeaders: UnifiedTableHeader[] = [
+    {
+      key: 'select',
+      className: 'w-12 text-center sticky left-0 bg-[#F5F6F8] z-20 shadow-[1px_0_0_#CBD5E1] border-r border-[#E5E7EB]',
+      label: (
+        <input
+          type="checkbox"
+          checked={paginatedLeads.length > 0 && selectedLeadIds.length === paginatedLeads.length}
+          onChange={handleToggleSelectAll}
+          className="h-4 w-4 rounded border-[#E5E7EB] text-[#2563EB] focus:ring-[#2563EB]/20 cursor-pointer"
+        />
+      ),
+    },
+    {
+      key: 'name',
+      className: 'sticky left-12 bg-[#F5F6F8] z-20 border-r border-slate-200 shadow-[1px_0_0_#CBD5E1] min-w-[200px]',
+      label: (
+        <div className="flex items-center space-x-1 select-none">
+          <span>Lead Name & ID</span>
+          {sortField === 'name' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-[#2563EB]" /> : <ChevronDown className="h-3.5 w-3.5 text-[#2563EB]" />)}
+        </div>
+      ),
+      onClick: () => {
+        setSortField('name');
+        setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        setCurrentPage(1);
+      }
+    },
+    {
+      key: 'company',
+      label: (
+        <div className="flex items-center space-x-1 select-none">
+          <span>Company / Domain</span>
+          {sortField === 'company' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-[#2563EB]" /> : <ChevronDown className="h-3.5 w-3.5 text-[#2563EB]" />)}
+        </div>
+      ),
+      onClick: () => {
+        setSortField('company');
+        setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        setCurrentPage(1);
+      }
+    },
+    { key: 'contactInfo', label: 'Contact Info (Email/Phone)' },
+    { key: 'status', label: 'Status' },
+    { key: 'source', label: 'Acquisition' },
+    { key: 'assignedTo', label: 'Assigned Manager' },
+    {
+      key: 'dealValue',
+      className: 'text-right',
+      label: (
+        <div className="flex items-center justify-end space-x-1 select-none">
+          <span>Deal Value</span>
+          {sortField === 'dealValue' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-[#2563EB]" /> : <ChevronDown className="h-3.5 w-3.5 text-[#2563EB]" />)}
+        </div>
+      ),
+      onClick: () => {
+        setSortField('dealValue');
+        setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        setCurrentPage(1);
+      }
+    },
+    { key: 'actions', className: 'text-center sticky right-0 bg-[#F5F6F8] z-20 border-l border-slate-200', label: 'Actions' }
+  ];
+
   return (
     <div className="space-y-6">
+      <style dangerouslySetInnerHTML={{ __html: `
+        html, body, #crm-content-container, #centric-crm-frame, main, #crm-viewport {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+        html::-webkit-scrollbar, body::-webkit-scrollbar, #crm-content-container::-webkit-scrollbar, #centric-crm-frame::-webkit-scrollbar, main::-webkit-scrollbar, #crm-viewport::-webkit-scrollbar {
+          display: none !important;
+        }
+      `}} />
       {/* Top Title Section */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-2 md:space-y-0">
         <div>
@@ -474,381 +549,246 @@ export default function LeadsView({
       </Card>
 
       {/* Enterprise-grade Leads Table */}
-      <div className="bg-white border border-[#E5E7EB] rounded-[8px] overflow-hidden">
-        <div className="overflow-x-auto crm-scrollbar">
-          <Table id="leads-directory-table" className="w-full text-left text-xs text-[#111827] border-collapse min-w-[1000px]">
-            {/* Headers Area */}
-            <TableHeader className="bg-[#F5F6F8] font-medium text-[#6B7280] uppercase tracking-wider text-[11px] border-b border-[#E5E7EB]">
-              <TableRow>
-                <TableHead className="py-3 px-4 w-12 text-center sticky left-0 bg-[#F5F6F8] z-20 border-r border-[#E5E7EB] shadow-[1px_0_0_#CBD5E1]">
-                  <input
-                    type="checkbox"
-                    checked={paginatedLeads.length > 0 && selectedLeadIds.length === paginatedLeads.length}
-                    onChange={handleToggleSelectAll}
-                    className="h-4 w-4 rounded border-[#E5E7EB] text-[#2563EB] focus:ring-[#2563EB]/20 cursor-pointer"
-                  />
-                </TableHead>
-                
-                <TableHead 
-                  className="py-3 px-4 cursor-pointer hover:bg-gray-105 transition-colors text-xs text-[#6B7280] sticky left-12 bg-[#F5F6F8] z-20 border-r border-slate-200 shadow-[1px_0_0_#CBD5E1] min-w-[200px]"
-                  onClick={() => {
-                    setSortField('name');
-                    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-                  }}
-                >
-                  <div className="flex items-center space-x-1">
-                    <span>Lead Name & ID</span>
-                    {sortField === 'name' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-[#2563EB]" /> : <ChevronDown className="h-3.5 w-3.5 text-[#2563EB]" />)}
-                  </div>
-                </TableHead>
+      <UnifiedTable
+        id="leads-directory-table"
+        data={paginatedLeads}
+        headers={tableHeaders}
+        hideScrollbar={true}
+        emptyStateText="No corporate leads matched this query. Try widening filtering parameters."
+        pagination={{
+          currentPage,
+          totalPages,
+          totalRecords: filteredLeads.length,
+          rowsPerPage,
+          onPageChange: setCurrentPage,
+          onRowsPerPageChange: setRowsPerPage,
+          recordTypeLabel: 'leads'
+        }}
+        renderRow={(lead) => {
+          const isChecked = selectedLeadIds.includes(lead.id);
+          
+          // Clean status highlights
+          let statusBg = 'bg-gray-100 text-gray-800 border-gray-200';
+          if (lead.status === 'Qualified') statusBg = 'bg-emerald-50 text-emerald-800 border-emerald-100';
+          else if (lead.status === 'Working' || lead.status === 'Contacted') statusBg = 'bg-blue-50 text-blue-800 border-blue-100';
+          else if (lead.status === 'Nurturing') statusBg = 'bg-indigo-50 text-indigo-800 border-indigo-100';
+          else if (lead.status === 'Unqualified') statusBg = 'bg-red-50 text-red-800 border-red-100';
 
-                <TableHead 
-                  className="py-3 px-4 cursor-pointer hover:bg-gray-100 transition-colors text-xs text-[#6B7280]"
-                  onClick={() => {
-                    setSortField('company');
-                    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-                  }}
-                >
-                  <div className="flex items-center space-x-1">
-                    <span>Company / Domain</span>
-                    {sortField === 'company' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-[#2563EB]" /> : <ChevronDown className="h-3.5 w-3.5 text-[#2563EB]" />)}
-                  </div>
-                </TableHead>
-
-                <TableHead className="py-3 px-4 text-xs text-[#6B7280]">Contact Info (Email/Phone)</TableHead>
-                
-                <TableHead className="py-3 px-4 text-xs text-[#6B7280]">Status</TableHead>
-                
-                <TableHead className="py-3 px-4 text-xs text-[#6B7280]">Acquisition</TableHead>
-                
-                <TableHead className="py-3 px-4 text-xs text-[#6B7280]">Assigned Manager</TableHead>
-                
-                <TableHead 
-                  className="py-3 px-4 text-right cursor-pointer hover:bg-gray-100 transition-colors text-xs text-[#6B7280]"
-                  onClick={() => {
-                    setSortField('dealValue');
-                    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-                  }}
-                >
-                  <div className="flex items-center justify-end space-x-1">
-                    <span>Deal Value</span>
-                    {sortField === 'dealValue' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-[#2563EB]" /> : <ChevronDown className="h-3.5 w-3.5 text-[#2563EB]" />)}
-                  </div>
-                </TableHead>
-
-                <TableHead className="py-3 px-4 text-center text-xs text-[#6B7280] sticky right-0 bg-[#F5F6F8] z-20 border-l border-slate-200">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-
-            {/* Rows Area */}
-            <TableBody className="divide-y divide-[#E5E7EB]">
-              {paginatedLeads.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={9} className="py-12 text-center text-[#6B7280]">
-                    No corporate leads matched this query. Try widening filtering parameters.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                paginatedLeads.map((lead) => {
-                  const isChecked = selectedLeadIds.includes(lead.id);
-                  
-                  // Clean status highlights
-                  let statusBg = 'bg-gray-100 text-gray-800 border-gray-200';
-                  if (lead.status === 'Qualified') statusBg = 'bg-emerald-50 text-emerald-800 border-emerald-100';
-                  else if (lead.status === 'Working' || lead.status === 'Contacted') statusBg = 'bg-blue-50 text-blue-800 border-blue-100';
-                  else if (lead.status === 'Nurturing') statusBg = 'bg-indigo-50 text-indigo-800 border-indigo-100';
-                  else if (lead.status === 'Unqualified') statusBg = 'bg-red-50 text-red-800 border-red-100';
-
-                  return (
-                    <tr 
-                      key={lead.id}
-                      className={`group h-[52px] transition-colors ${
-                        isChecked ? 'bg-[#EFF6FF]/40' : 'hover:bg-slate-50'
-                      }`}
-                    >
-                      {/* Checkbox column */}
-                      <td className={`py-2.5 px-4 text-center sticky left-0 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-r border-[#E5E7EB]`}>
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleToggleSelectRow(lead.id)}
-                          className="h-4 w-4 rounded border-[#E5E7EB] text-[#2563EB] focus:ring-[#2563EB]/20 cursor-pointer"
-                        />
-                      </td>
-
-                      {/* Lead Name & ID */}
-                      <td className={`py-2.5 px-4 sticky left-12 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-r border-slate-200 min-w-[200px]`}>
-                        <div className="flex flex-col">
-                          <a 
-                            href={`/lead-details?id=${lead.id}`}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              window.history.pushState({ tab: 'lead-details' }, '', `/lead-details?id=${lead.id}`);
-                              const popstateEvent = new PopStateEvent('popstate');
-                              window.dispatchEvent(popstateEvent);
-                            }}
-                            className="font-semibold text-[#2563EB] hover:text-[#1D4ED8] hover:underline text-[13px] text-left cursor-pointer"
-                          >
-                            {lead.name}
-                          </a>
-                          <span className="text-[10px] uppercase font-mono text-[#6B7280]">{lead.id}</span>
-                        </div>
-                      </td>
-
-                      {/* Company Name */}
-                      <td className="py-2.5 px-4 font-medium text-[#111827]">
-                        {lead.company}
-                      </td>
-
-                      {/* Contact details */}
-                      <td className="py-2.5 px-4">
-                        <div className="flex flex-col text-[#6B7280]">
-                          <span className="truncate max-w-[160px]">{lead.email}</span>
-                          <span className="text-[11px]">{lead.phone}</span>
-                        </div>
-                      </td>
-
-                      {/* Status badge */}
-                      <td className="py-2.5 px-4">
-                        <span className={`px-2 py-0.5 border rounded-[4px] text-[11px] font-medium ${statusBg}`}>
-                          {lead.status}
-                        </span>
-                      </td>
-
-                      {/* Sourcing Channel */}
-                      <td className="py-2.5 px-4 font-mono text-[11px] text-[#6B7280]">
-                        {lead.source}
-                      </td>
-
-                      {/* Assigned Representative */}
-                      <td className="py-2.5 px-4 text-[#111827]">
-                        <div className="flex items-center space-x-1.5">
-                          <span className="font-medium text-[12px]">{lead.assignedTo}</span>
-                        </div>
-                      </td>
-
-                      {/* Value mapping */}
-                      <td className="py-2.5 px-4 text-right font-semibold text-[#111827]">
-                        {formatUSD(lead.dealValue)}
-                      </td>
-
-                      {/* Row actions */}
-                      <td className={`py-2.5 px-4 text-center sticky right-0 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-l border-slate-200`}>
-                        <div className="flex items-center justify-center">
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button
-                                id={`leads-popover-trigger-${lead.id}`}
-                                variant="ghost"
-                                className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full flex items-center justify-center cursor-pointer"
-                              >
-                                <MoreVertical className="h-4.5 w-4.5 text-slate-500" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-48 p-1 bg-white border border-[#E5E7EB] shadow-lg rounded-md z-40" align="end">
-                              <div className="flex flex-col text-xs font-medium">
-                                <a
-                                  href={`/lead-details?id=${lead.id}`}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    window.history.pushState({ tab: 'lead-details' }, '', `/lead-details?id=${lead.id}`);
-                                    window.dispatchEvent(new PopStateEvent('popstate'));
-                                  }}
-                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700"
-                                >
-                                  <Eye className="h-3.5 w-3.5 text-blue-500" />
-                                  <span>View Details</span>
-                                </a>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveActionLead(lead);
-                                    setActiveActionType('notes');
-                                    setNoteContent('');
-                                  }}
-                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
-                                >
-                                  <MessageSquare className="h-3.5 w-3.5 text-indigo-500" />
-                                  <span>Add Note</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveActionLead(lead);
-                                    setActiveActionType('followup');
-                                    setFollowupTitle(`Follow-up with ${lead.name}`);
-                                    setFollowupDate(new Date().toISOString().slice(0, 10));
-                                    setFollowupPriority('Medium');
-                                  }}
-                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
-                                >
-                                  <CalendarDays className="h-3.5 w-3.5 text-amber-500" />
-                                  <span>Followups</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveActionLead(lead);
-                                    setActiveActionType('meeting');
-                                    setMeetingTitle(`Meeting with ${lead.name}`);
-                                    setMeetingDate(new Date().toISOString().slice(0, 10));
-                                  }}
-                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
-                                >
-                                  <CalendarDays className="h-3.5 w-3.5 text-green-500" />
-                                  <span>Set Meeting</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveActionLead(lead);
-                                    setActiveActionType('assignee');
-                                    setSelectedAssignee(lead.assignedTo);
-                                  }}
-                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
-                                >
-                                  <UserCog className="h-3.5 w-3.5 text-cyan-500" />
-                                  <span>Change Assignee</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingLeadId(lead.id);
-                                    reset({
-                                      firstName: lead.firstName || lead.name.split(' ')[0] || '',
-                                      lastName: lead.lastName || lead.name.split(' ').slice(1).join(' ') || '',
-                                      name: lead.name,
-                                      company: lead.company,
-                                      email: lead.email,
-                                      phone: lead.phone,
-                                      status: lead.status,
-                                      source: lead.source,
-                                      assignedTo: lead.assignedTo,
-                                      notes: lead.notes || '',
-                                      companyWebsite: lead.companyWebsite || '',
-                                      facebook: lead.facebook || '',
-                                      emailOptOut: lead.emailOptOut || false,
-                                      addressStreet: lead.addressInfo?.street || '',
-                                      addressCity: lead.addressInfo?.city || '',
-                                      addressState: lead.addressInfo?.state || '',
-                                      addressPostalCode: lead.addressInfo?.postalCode || '',
-                                      addressCountry: lead.addressInfo?.country || '',
-                                      priority: lead.priority || 'Medium',
-                                    });
-                                    setShowAddModal(true);
-                                  }}
-                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
-                                >
-                                  <Edit2 className="h-3.5 w-3.5 text-purple-500" />
-                                  <span>Edit Lead</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveActionLead(lead);
-                                    setActiveActionType('email');
-                                    setEmailSubject(`Followup: Core CRM context for ${lead.company}`);
-                                    setEmailBody(`Hi ${lead.name},\n\nI wanted to reach out regarding our solution proposal...\n\nBest regards,\n${currentUser?.name || 'Sarah Jenkins'}`);
-                                  }}
-                                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
-                                >
-                                  <Mail className="h-3.5 w-3.5 text-sky-500" />
-                                  <span>Send Email</span>
-                                </button>
-
-                                <div className="border-t border-slate-100 my-1"></div>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (confirm(`Are you sure you want to delete lead ${lead.name}?`)) {
-                                      onDeleteLeads([lead.id]);
-                                    }
-                                  }}
-                                  className="w-full text-left px-3 py-2 hover:bg-red-50 text-red-600 transition-colors rounded flex items-center gap-2 cursor-pointer"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                                  <span>Delete Lead</span>
-                                </button>
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
-        {/* Table Footer / Unified Pagination Controls */}
-        <div className="px-5 py-3 border-t border-[#E5E7EB] bg-white flex flex-col sm:flex-row items-center justify-between text-xs text-[#6B7280] space-y-3 sm:space-y-0 select-none">
-          <div className="flex items-center space-x-2">
-            <span>Rows per page:</span>
-            <FormSelect
-              value={String(rowsPerPage)}
-              onChange={(val) => {
-                setRowsPerPage(Number(val));
-                setCurrentPage(1);
-              }}
-              options={[
-                { value: '5', label: '5' },
-                { value: '10', label: '10' },
-                { value: '25', label: '25' },
-                { value: '50', label: '50' }
-              ]}
-              className="w-16"
-            />
-            <span>
-              Showing {filteredLeads.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0} - {Math.min(currentPage * rowsPerPage, filteredLeads.length)} of {filteredLeads.length} records
-            </span>
-          </div>
-
-          <div className="flex items-center space-x-1">
-            <button
-              onClick={() => setCurrentPage(1)}
-              disabled={currentPage === 1}
-              className="px-2.5 py-1 bg-white border border-[#E5E7EB] text-[#111827] rounded-[4px] disabled:opacity-40"
+          return (
+            <tr 
+              key={lead.id}
+              className={`group h-[52px] border-b border-[#E5E7EB] transition-colors ${
+                isChecked ? 'bg-[#EFF6FF]/40' : 'hover:bg-slate-50'
+              }`}
             >
-              First
-            </button>
-            <button
-              id="btn-leads-page-prev"
-              onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
-              disabled={currentPage === 1}
-              className="px-2.5 py-1 bg-white border border-[#E5E7EB] text-[#111827] rounded-[4px] disabled:opacity-40"
-            >
-              Previous
-            </button>
-            <span className="px-3 py-1 bg-[#EFF6FF] border border-[#2563EB]/20 text-[#2563EB] rounded-[4px] font-semibold">
-              {currentPage} / {totalPages}
-            </span>
-            <button
-              id="btn-leads-page-next"
-              onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="px-2.5 py-1 bg-white border border-[#E5E7EB] text-[#111827] rounded-[4px] disabled:opacity-40"
-            >
-              Next
-            </button>
-            <button
-              onClick={() => setCurrentPage(totalPages)}
-              disabled={currentPage === totalPages}
-              className="px-2.5 py-1 bg-white border border-[#E5E7EB] text-[#111827] rounded-[4px] disabled:opacity-40"
-            >
-              Last
-            </button>
-          </div>
-        </div>
-      </div>
+              {/* Checkbox column */}
+              <td className={`py-2.5 px-4 text-center sticky left-0 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-r border-[#E5E7EB]`}>
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => handleToggleSelectRow(lead.id)}
+                  className="h-4 w-4 rounded border-[#E5E7EB] text-[#2563EB] focus:ring-[#2563EB]/20 cursor-pointer"
+                />
+              </td>
+
+              {/* Lead Name & ID */}
+              <td className={`py-2.5 px-4 sticky left-12 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-r border-slate-200 min-w-[200px]`}>
+                <div className="flex flex-col">
+                  <a 
+                    href={`/lead-details/${lead.id}`}
+                    className="font-semibold text-[#2563EB] hover:text-[#1D4ED8] hover:underline text-[13px] text-left cursor-pointer"
+                  >
+                    {lead.name}
+                  </a>
+                  <span className="text-[10px] uppercase font-mono text-[#6B7280]">{lead.id}</span>
+                </div>
+              </td>
+
+              {/* Company Name */}
+              <td className="py-2.5 px-4 font-medium text-[#111827]">
+                {lead.company}
+              </td>
+
+              {/* Contact details */}
+              <td className="py-2.5 px-4">
+                <div className="flex flex-col text-[#6B7280]">
+                  <span className="truncate max-w-[160px]">{lead.email}</span>
+                  <span className="text-[11px]">{lead.phone}</span>
+                </div>
+              </td>
+
+              {/* Status badge */}
+              <td className="py-2.5 px-4">
+                <span className={`px-2 py-0.5 border rounded-[4px] text-[11px] font-medium ${statusBg}`}>
+                  {lead.status}
+                </span>
+              </td>
+
+              {/* Sourcing Channel */}
+              <td className="py-2.5 px-4 font-mono text-[11px] text-[#6B7280]">
+                {lead.source}
+              </td>
+
+              {/* Assigned Representative */}
+              <td className="py-2.5 px-4 text-[#111827]">
+                <div className="flex items-center space-x-1.5">
+                  <span className="font-medium text-[12px]">{lead.assignedTo}</span>
+                </div>
+              </td>
+
+              {/* Value mapping */}
+              <td className="py-2.5 px-4 text-right font-semibold text-[#111827]">
+                {formatUSD(lead.dealValue)}
+              </td>
+
+              {/* Row actions */}
+              <td className={`py-2.5 px-4 text-center sticky right-0 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-l border-slate-200`}>
+                <div className="flex items-center justify-center">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        id={`leads-popover-trigger-${lead.id}`}
+                        variant="ghost"
+                        className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full flex items-center justify-center cursor-pointer"
+                      >
+                        <MoreVertical className="h-4.5 w-4.5 text-slate-500" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-48 p-1 bg-white border border-[#E5E7EB] shadow-lg rounded-md z-40" align="end">
+                      <div className="flex flex-col text-xs font-medium">
+                        <a
+                          href={`/lead-details/${lead.id}`}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700"
+                        >
+                          <Eye className="h-3.5 w-3.5 text-blue-500" />
+                          <span>View Details</span>
+                        </a>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveActionLead(lead);
+                            setActiveActionType('notes');
+                            setNoteContent('');
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                        >
+                          <MessageSquare className="h-3.5 w-3.5 text-indigo-500" />
+                          <span>Add Note</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveActionLead(lead);
+                            setActiveActionType('followup');
+                            setFollowupTitle(`Follow-up with ${lead.name}`);
+                            setFollowupDate(new Date().toISOString().slice(0, 10));
+                            setFollowupPriority('Medium');
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                        >
+                          <CalendarDays className="h-3.5 w-3.5 text-amber-500" />
+                          <span>Followups</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveActionLead(lead);
+                            setActiveActionType('meeting');
+                            setMeetingTitle(`Meeting with ${lead.name}`);
+                            setMeetingDate(new Date().toISOString().slice(0, 10));
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                        >
+                          <CalendarDays className="h-3.5 w-3.5 text-green-500" />
+                          <span>Set Meeting</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveActionLead(lead);
+                            setActiveActionType('assignee');
+                            setSelectedAssignee(lead.assignedTo);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                        >
+                          <UserCog className="h-3.5 w-3.5 text-cyan-500" />
+                          <span>Change Assignee</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingLeadId(lead.id);
+                            reset({
+                              firstName: lead.firstName || lead.name.split(' ')[0] || '',
+                              lastName: lead.lastName || lead.name.split(' ').slice(1).join(' ') || '',
+                              name: lead.name,
+                              company: lead.company,
+                              email: lead.email,
+                              phone: lead.phone,
+                              status: lead.status,
+                              source: lead.source,
+                              assignedTo: lead.assignedTo,
+                              notes: lead.notes || '',
+                              companyWebsite: lead.companyWebsite || '',
+                              facebook: lead.facebook || '',
+                              emailOptOut: lead.emailOptOut || false,
+                              addressStreet: lead.addressInfo?.street || '',
+                              addressCity: lead.addressInfo?.city || '',
+                              addressState: lead.addressInfo?.state || '',
+                              addressPostalCode: lead.addressInfo?.postalCode || '',
+                              addressCountry: lead.addressInfo?.country || '',
+                              priority: lead.priority || 'Medium',
+                            });
+                            setShowAddModal(true);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                        >
+                          <Edit2 className="h-3.5 w-3.5 text-purple-500" />
+                          <span>Edit Lead</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveActionLead(lead);
+                            setActiveActionType('email');
+                            setEmailSubject(`Followup: Core CRM context for ${lead.company}`);
+                            setEmailBody(`Hi ${lead.name},\n\nI wanted to reach out regarding our solution proposal...\n\nBest regards,\n${currentUser?.name || 'Sarah Jenkins'}`);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                        >
+                          <Mail className="h-3.5 w-3.5 text-sky-500" />
+                          <span>Send Email</span>
+                        </button>
+
+                        <div className="border-t border-slate-100 my-1"></div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`Are you sure you want to delete lead ${lead.name}?`)) {
+                              onDeleteLeads([lead.id]);
+                            }
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-red-50 text-red-600 transition-colors rounded flex items-center gap-2 cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          <span>Delete Lead</span>
+                        </button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </td>
+            </tr>
+          );
+        }}
+      />
 
       {/* SIDE PANEL: ADD NEW CORPORATE LEAD */}
       <Sheet open={showAddModal} onOpenChange={setShowAddModal}>

@@ -80,50 +80,94 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
     saveCRMData(newLeads, newDeals, newTasks, newActivities, finalContacts);
   };
 
-  const addLead = (leadInput: Omit<Lead, 'id' | 'createdAt' | 'lastActivity'>) => {
-    const freshLead: Lead = {
-      ...leadInput,
-      id: `LD-${Math.floor(100 + Math.random() * 900)}`,
+  // Helper to append a new activity log
+  const logActivity = (
+    type: Activity['type'],
+    description: string,
+    entityName?: string,
+    value?: number
+  ): Activity[] => {
+    const newActivity: Activity = {
+      id: `ACT-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type,
+      user: currentUser.name,
+      description,
+      entityName,
+      value
+    };
+    return [newActivity, ...activities];
+  };
+
+  // Generic entity creation helper
+  const addEntity = <T extends { id: string; createdAt: string; lastActivity: string }>(
+    entityInput: any,
+    prefix: 'LD' | 'CON'
+  ): T => {
+    return {
+      ...entityInput,
+      id: `${prefix}-${Math.floor(100 + Math.random() * 900)}`,
       createdAt: new Date().toISOString(),
       lastActivity: new Date().toISOString()
-    };
+    } as unknown as T;
+  };
+
+  // Generic entity update helper
+  const updateEntityRecord = <T extends { id: string; lastActivity: string }>(
+    id: string,
+    updatedFields: Partial<T>,
+    list: T[]
+  ): T[] => {
+    return list.map(item => {
+      if (item.id === id) {
+        return { ...item, ...updatedFields, lastActivity: new Date().toISOString() };
+      }
+      return item;
+    });
+  };
+
+  // Generic list importer helper
+  const importEntitiesList = <T extends { id: string; createdAt: string; lastActivity: string; notes?: string }>(
+    newImported: Partial<T>[],
+    prefix: 'LD' | 'CON',
+    rowMapper: (item: Partial<T>) => Partial<T>
+  ): T[] => {
+    return newImported.map((part) => {
+      const parsedPart = rowMapper(part);
+      return {
+        ...parsedPart,
+        id: `${prefix}-${Math.floor(100 + Math.random() * 900)}`,
+        createdAt: new Date().toISOString(),
+        lastActivity: new Date().toISOString(),
+        notes: parsedPart.notes || 'Acquired through bulk database CSV import.'
+      } as unknown as T;
+    });
+  };
+
+  const addLead = (leadInput: Omit<Lead, 'id' | 'createdAt' | 'lastActivity'>) => {
+    const freshLead = addEntity<Lead>(leadInput, 'LD');
     const updated = [freshLead, ...leads];
     const description = `Registered new lead account: ${freshLead.name} (${freshLead.company}).`;
-    const nextActivities: Activity[] = [
-      {
-        id: `ACT-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: 'lead_created',
-        user: currentUser.name,
-        description,
-        entityName: freshLead.name,
-        value: freshLead.dealValue
-      },
-      ...activities
-    ];
+    const nextActivities = logActivity('lead_created', description, freshLead.name, freshLead.dealValue);
     persistChanges(updated, deals, tasks, nextActivities);
   };
 
   const updateLead = (id: string, updatedFields: Partial<Lead>) => {
-    const updated = leads.map(l => {
-      if (l.id === id) {
-        return { ...l, ...updatedFields, lastActivity: new Date().toISOString() };
-      }
-      return l;
-    });
+    const updated = updateEntityRecord<Lead>(id, updatedFields, leads);
     const leadObj = leads.find(l => l.id === id);
     let nextActivities = [...activities];
     if (updatedFields.status && leadObj && leadObj.status !== updatedFields.status) {
+      const description = `Updated status of "${leadObj.name}" to ${updatedFields.status}.`;
       nextActivities = [
         {
           id: `ACT-${Date.now()}`,
           timestamp: new Date().toISOString(),
           type: 'stage_changed',
           user: currentUser.name,
-          description: `Updated status of "${leadObj.name}" to ${updatedFields.status}.`,
+          description,
           entityName: leadObj.name
         },
-        ...nextActivities
+        ...activities
       ];
     }
     persistChanges(updated, deals, tasks, nextActivities);
@@ -132,47 +176,25 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
   const deleteLeads = (ids: string[]) => {
     const updated = leads.filter(l => !ids.includes(l.id));
     const description = `Permanently purged ${ids.length} lead account folder records.`;
-    const nextActivities: Activity[] = [
-      {
-        id: `ACT-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: 'lead_created',
-        user: currentUser.name,
-        description
-      },
-      ...activities
-    ];
+    const nextActivities = logActivity('lead_created', description);
     persistChanges(updated, deals, tasks, nextActivities);
   };
 
   const importLeads = (newImportedLeads: Partial<Lead>[]) => {
-    const resolved: Lead[] = newImportedLeads.map((part) => ({
-      id: `LD-${Math.floor(100 + Math.random() * 900)}`,
+    const resolved = importEntitiesList<Lead>(newImportedLeads, 'LD', part => ({
       name: part.name || 'Imported Lead',
       company: part.company || 'Enterprise Corp',
       email: part.email || 'info@company.com',
       phone: part.phone || '+1 (555) 000-0000',
-      status: (part.status as any) || 'New',
-      source: (part.source as any) || 'Inbound',
+      status: part.status || 'New',
+      source: part.source || 'Inbound',
       assignedTo: part.assignedTo || currentUser.name,
       dealValue: part.dealValue || 10000,
-      createdAt: new Date().toISOString(),
-      lastActivity: new Date().toISOString(),
-      notes: 'Acquired through bulk database CSV import.'
-    }));
+    } as any));
 
     const updated = [...resolved, ...leads];
     const description = `Executed Bulk CSV deployment. Successfully registered ${resolved.length} business entities.`;
-    const nextActivities: Activity[] = [
-      {
-        id: `ACT-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: 'lead_created',
-        user: currentUser.name,
-        description
-      },
-      ...activities
-    ];
+    const nextActivities = logActivity('lead_created', description);
     persistChanges(updated, deals, tasks, nextActivities);
   };
 
@@ -184,18 +206,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
     };
     const updated = [freshDeal, ...deals];
     const description = `Drafted contract offer proposal: "${freshDeal.title}" with company ${freshDeal.company}.`;
-    const nextActivities: Activity[] = [
-      {
-        id: `ACT-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: 'lead_created',
-        user: currentUser.name,
-        description,
-        entityName: freshDeal.title,
-        value: freshDeal.value
-      },
-      ...activities
-    ];
+    const nextActivities = logActivity('lead_created', description, freshDeal.title, freshDeal.value);
     persistChanges(leads, updated, tasks, nextActivities);
   };
 
@@ -211,18 +222,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
     });
 
     const description = `Advanced opportunity "${dealObj.title}" to stage: ${stage}.`;
-    const nextActivities: Activity[] = [
-      {
-        id: `ACT-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: 'stage_changed',
-        user: currentUser.name,
-        description,
-        entityName: dealObj.title,
-        value: dealObj.value
-      },
-      ...activities
-    ];
+    const nextActivities = logActivity('stage_changed', description, dealObj.title, dealObj.value);
     persistChanges(leads, updated, tasks, nextActivities);
   };
 
@@ -242,18 +242,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
       ? `Successfully secured contract closed WON!: "${dealObj.title}" valued at ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(dealObj.value)}!`
       : `Marked proposal "${dealObj.title}" as closed LOST. Reason: Competition / unqualified.`;
 
-    const nextActivities: Activity[] = [
-      {
-        id: `ACT-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: logType,
-        user: currentUser.name,
-        description,
-        entityName: dealObj.title,
-        value: dealObj.value
-      },
-      ...activities
-    ];
+    const nextActivities = logActivity(logType, description, dealObj.title, dealObj.value);
     persistChanges(leads, updated, tasks, nextActivities);
   };
 
@@ -263,62 +252,34 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
     if (!dealObj) return;
 
     const description = `Removed opportunity proposal folder: "${dealObj.title}".`;
-    const nextActivities: Activity[] = [
-      {
-        id: `ACT-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: 'stage_changed',
-        user: currentUser.name,
-        description
-      },
-      ...activities
-    ];
+    const nextActivities = logActivity('stage_changed', description);
     persistChanges(leads, updated, tasks, nextActivities);
   };
 
   const addContact = (contactInput: Omit<Contact, 'id' | 'createdAt' | 'lastActivity'>) => {
-    const freshContact: Contact = {
-      ...contactInput,
-      id: `CON-${Math.floor(500 + Math.random() * 499)}`,
-      createdAt: new Date().toISOString(),
-      lastActivity: new Date().toISOString()
-    };
+    const freshContact = addEntity<Contact>(contactInput, 'CON');
     const updated = [freshContact, ...contacts];
     const description = `Added new unified business Contact: ${freshContact.name} (${freshContact.company}).`;
-    const nextActivities: Activity[] = [
-      {
-        id: `ACT-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: 'lead_created',
-        user: currentUser.name,
-        description,
-        entityName: freshContact.name
-      },
-      ...activities
-    ];
+    const nextActivities = logActivity('lead_created', description, freshContact.name);
     persistChanges(leads, deals, tasks, nextActivities, updated);
   };
 
   const updateContact = (id: string, updatedFields: Partial<Contact>) => {
-    const updated = contacts.map(c => {
-      if (c.id === id) {
-        return { ...c, ...updatedFields, lastActivity: new Date().toISOString() };
-      }
-      return c;
-    });
+    const updated = updateEntityRecord<Contact>(id, updatedFields, contacts);
     const contactObj = contacts.find(c => c.id === id);
     let nextActivities = [...activities];
     if (updatedFields.priority && contactObj && contactObj.priority !== updatedFields.priority) {
+      const description = `Updated priority of Contact "${contactObj.name}" to ${updatedFields.priority}.`;
       nextActivities = [
         {
           id: `ACT-${Date.now()}`,
           timestamp: new Date().toISOString(),
           type: 'stage_changed',
           user: currentUser.name,
-          description: `Updated priority of Contact "${contactObj.name}" to ${updatedFields.priority}.`,
+          description,
           entityName: contactObj.name
         },
-        ...nextActivities
+        ...activities
       ];
     }
     persistChanges(leads, deals, tasks, nextActivities, updated);
@@ -327,48 +288,26 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
   const deleteContacts = (ids: string[]) => {
     const updated = contacts.filter(c => !ids.includes(c.id));
     const description = `Archived ${ids.length} corporate relationship Contacts.`;
-    const nextActivities: Activity[] = [
-      {
-        id: `ACT-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: 'lead_created',
-        user: currentUser.name,
-        description
-      },
-      ...activities
-    ];
+    const nextActivities = logActivity('lead_created', description);
     persistChanges(leads, deals, tasks, nextActivities, updated);
   };
 
   const importContacts = (newImportedContacts: Partial<Contact>[]) => {
-    const resolved: Contact[] = newImportedContacts.map((part) => ({
-      id: `CON-${Math.floor(500 + Math.random() * 499)}`,
+    const resolved = importEntitiesList<Contact>(newImportedContacts, 'CON', part => ({
       name: part.name || 'Imported Contact',
       firstName: part.firstName || part.name?.split(' ')[0] || 'Imported',
       lastName: part.lastName || part.name?.split(' ').slice(1).join(' ') || 'Contact',
       company: part.company || 'Enterprise Corp',
       email: part.email || 'info@company.com',
       phone: part.phone || '+1 (555) 000-0000',
-      source: (part.source as any) || 'Inbound',
+      source: part.source || 'Inbound',
       assignedTo: part.assignedTo || currentUser.name,
       dealValue: part.dealValue || 10000,
-      createdAt: new Date().toISOString(),
-      lastActivity: new Date().toISOString(),
-      notes: 'Acquired through bulk database CSV import.'
-    }));
+    } as any));
 
     const updated = [...resolved, ...contacts];
     const description = `Executed Bulk CSV deployment. Successfully registered ${resolved.length} business partners.`;
-    const nextActivities: Activity[] = [
-      {
-        id: `ACT-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        type: 'lead_created',
-        user: currentUser.name,
-        description
-      },
-      ...activities
-    ];
+    const nextActivities = logActivity('lead_created', description);
     persistChanges(leads, deals, tasks, nextActivities, updated);
   };
 
@@ -395,16 +334,17 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
 
     let nextActivities = [...activities];
     if (nextStatus === 'Completed') {
+      const description = `Completed follow-up checklist: "${taskObj.title}".`;
       nextActivities = [
         {
           id: `ACT-${Date.now()}`,
           timestamp: new Date().toISOString(),
           type: 'task_completed',
           user: currentUser.name,
-          description: `Completed follow-up checklist: "${taskObj.title}".`,
+          description,
           entityName: taskObj.title
         },
-        ...nextActivities
+        ...activities
       ];
     }
     persistChanges(leads, deals, updated, nextActivities);

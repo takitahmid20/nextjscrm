@@ -22,6 +22,7 @@ interface UnifiedTableProps<T> {
   headers: UnifiedTableHeader[];
   renderRow: (item: T, index: number) => React.ReactNode;
   emptyStateText?: string;
+  hideScrollbar?: boolean;
   pagination?: {
     currentPage: number;
     totalPages: number;
@@ -41,12 +42,13 @@ export function UnifiedTable<T>({
   headers,
   renderRow,
   emptyStateText = 'No records matched this query.',
+  hideScrollbar = false,
   pagination,
 }: UnifiedTableProps<T>) {
   return (
     <div className="space-y-4">
       <div className={cn("bg-white border border-[#E5E7EB] rounded-[8px] overflow-hidden", className)}>
-        <div className="overflow-x-auto crm-scrollbar">
+        <div className={cn("overflow-x-auto crm-scrollbar", hideScrollbar && "scrollbar-none")}>
           <Table id={id} className="w-full text-left text-xs border-collapse min-w-full">
             <TableHeader className="bg-[#F5F6F8] font-medium text-[#6B7280] uppercase tracking-wider text-[11px] border-b border-[#E5E7EB]">
               <TableRow>
