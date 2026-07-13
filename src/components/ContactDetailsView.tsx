@@ -8,6 +8,8 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Mail, Plus, Trash2, User, Sparkles, TrendingUp, MoreVertical } from 'lucide-react';
 import { Contact, CRMTask, Deal } from '../types';
+import { useCRM } from '../context/CRMContext';
+import { useToast } from '../context/ToastContext';
 import { Button } from '@/components/ui/button';
 import { FormSelect } from './forms/FormControls';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -17,6 +19,7 @@ import CRMProgressBanner from './details/CRMProgressBanner';
 import CRMDemographicsCard from './details/CRMDemographicsCard';
 import CRMAddressCard from './details/CRMAddressCard';
 import CRMInteractionTabs from './details/CRMInteractionTabs';
+import AttachmentsPanel from './AttachmentsPanel';
 import CRMEditEntitySheet from './sheets/CRMEditEntitySheet';
 import CRMOpportunityDealSheet from './sheets/CRMOpportunityDealSheet';
 import CRMOutboundEmailSheet from './sheets/CRMOutboundEmailSheet';
@@ -45,6 +48,9 @@ export default function ContactDetailsView({
   onBack
 }: ContactDetailsViewProps) {
   
+  const { showToast } = useToast();
+  const { loading, currentUser } = useCRM();
+
   // Find contact
   const contact = contacts.find(c => c.id === contactId);
 
@@ -82,14 +88,24 @@ export default function ContactDetailsView({
     );
   }, [tasks, contact]);
 
-  // Fallback if not found
+  // Data is still loading (e.g. right after a full-page navigation to this
+  // route) — show a loading state instead of a false "not found."
+  if (!contact && loading) {
+    return (
+      <div id="contact-loading" className="text-center py-16 bg-card border border-border rounded-lg shadow-sm">
+        <p className="text-sm text-muted-foreground">Loading contact record…</p>
+      </div>
+    );
+  }
+
+  // Fallback if genuinely not found
   if (!contact) {
     return (
-      <div id="contact-not-found" className="text-center py-16 bg-white border border-[#E5E7EB] rounded-lg shadow-sm">
-        <User className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-        <h2 className="text-lg font-semibold text-gray-900">Contact Record Not Found</h2>
-        <p className="text-sm text-gray-500 mb-4">The customer directory record you are attempting to review may have been purged or relocated.</p>
-        <Button onClick={onBack} className="bg-[#2563EB] hover:bg-[#1D4ED8] text-white">
+      <div id="contact-not-found" className="text-center py-16 bg-card border border-border rounded-lg shadow-sm">
+        <User className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+        <h2 className="text-lg font-semibold text-foreground">Contact Record Not Found</h2>
+        <p className="text-sm text-muted-foreground mb-4">The customer directory record you are attempting to review may have been purged or relocated.</p>
+        <Button onClick={onBack} className="bg-primary hover:bg-primary/90 text-primary-foreground">
           <ArrowLeft className="h-4 w-4 mr-1.5" />
           Back to Directory
         </Button>
@@ -98,10 +114,10 @@ export default function ContactDetailsView({
   }
 
   // Callback to persist profile mutations
-  const handleProfileSave = (updatedFields: any) => {
+  const handleProfileSave = (updatedFields: Partial<Contact>) => {
     onUpdateContact(contact.id, updatedFields);
     setShowEditSheet(false);
-    alert('Contact relationships profile successfully saved.');
+    showToast('Contact profile saved.', 'success');
   };
 
   // Timeline note CRUD callbacks
@@ -110,24 +126,24 @@ export default function ContactDetailsView({
       id: `NOTE-${Date.now()}`,
       content,
       date: new Date().toISOString(),
-      author: 'Sarah Jenkins' // Default user
+      author: currentUser.name
     };
     onUpdateContact(contact.id, {
       notes: content,
       notes_history: [entry, ...notesHistory]
     });
-    alert('Timeline note added successfully.');
+    showToast('Note added.', 'success');
   };
 
   const handleSaveEditedNote = (id: string, content: string) => {
-    const updated = notesHistory.map(note => 
+    const updated = notesHistory.map(note =>
       note.id === id ? { ...note, content, date: new Date().toISOString() } : note
     );
     onUpdateContact(contact.id, {
       notes_history: updated,
       notes: updated[0]?.content || ''
     });
-    alert('Timeline note entry modified.');
+    showToast('Note updated.', 'success');
   };
 
   const handleDeleteNote = (id: string) => {
@@ -136,44 +152,45 @@ export default function ContactDetailsView({
       notes_history: filtered,
       notes: filtered[0]?.content || ''
     });
-    alert('Timeline note entry removed.');
+    showToast('Note removed.', 'success');
   };
 
   const handleSendEmail = (subject: string, body: string) => {
     onUpdateContact(contact.id, {
       lastActivity: `Sent email regarding: "${subject}"`
     });
-    alert(`Outbound message sent to <${contact.email}>.`);
+    showToast(`Email sent to ${contact.email}.`, 'success');
   };
 
-  const handleAddDealProxy = (dealPayload: any) => {
+  const handleAddDealProxy = (dealPayload: Omit<Deal, 'id' | 'createdAt'>) => {
     onAddDeal(dealPayload);
-    alert(`New deal opportunity "${dealPayload.title}" created successfully.`);
+    showToast(`Deal "${dealPayload.title}" created.`, 'success');
   };
 
   return (
     <div id="contact-details-dashboard" className="max-w-7xl mx-auto p-4 md:p-6 space-y-6 pb-20">
       
       {/* 1. Header and Actions Row */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between space-y-3 md:space-y-0 pb-2 border-b border-[#E5E7EB]">
-        
+      <div className="flex flex-col md:flex-row md:items-center justify-between space-y-3 md:space-y-0 pb-2 border-b border-border">
+
         <div className="flex items-center space-x-3.5">
-          <Button 
-            variant="outline" 
-            onClick={onBack} 
-            className="p-2 cursor-pointer bg-white hover:bg-slate-100 text-slate-700 rounded-md border border-[#E5E7EB] transition-colors flex items-center justify-center shadow-xs h-9 w-9"
+          <Button
+            variant="outline"
+            onClick={onBack}
+            aria-label="Back to contacts directory"
+            className="p-2 cursor-pointer bg-card hover:bg-muted text-foreground rounded-md border border-border transition-colors flex items-center justify-center shadow-xs h-9 w-9"
           >
             <ArrowLeft className="h-4.5 w-4.5" />
           </Button>
           <div>
             <div className="flex items-center space-x-2">
-              <h1 className="text-2xl font-bold text-[#111827] mt-0.5 tracking-tight">{contact.name}</h1>
-              <span className="text-[11px] font-mono font-semibold text-[#6B7280] bg-[#E5E7EB]/55 px-1.5 py-0.5 rounded uppercase">
+              <h1 className="text-2xl font-bold text-foreground mt-0.5 tracking-tight">{contact.name}</h1>
+              <span className="text-[11px] font-mono font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded uppercase">
                 {contact.id}
               </span>
             </div>
-            <p className="text-xs text-[#6B7280] flex items-center gap-1 mt-0.5">
-              <TrendingUp className="h-3.5 w-3.5 text-blue-500" />
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+              <TrendingUp className="h-3.5 w-3.5 text-primary" />
               Strategic business contact entity linked to {contact.company}
             </p>
           </div>
@@ -182,12 +199,12 @@ export default function ContactDetailsView({
         {/* Dynamic Action Controls */}
         <div className="flex flex-wrap items-center gap-3 select-none">
           <div className="flex items-center space-x-2">
-            <span className="text-xs text-slate-500 font-medium">Contact Priority:</span>
+            <span className="text-xs text-muted-foreground font-medium">Contact Priority:</span>
             <FormSelect
               id="contact-detail-priority-direct"
               value={contact.priority || 'Medium'}
               onChange={(val) => {
-                onUpdateContact(contact.id, { priority: val as any });
+                onUpdateContact(contact.id, { priority: val as Contact['priority'] });
               }}
               options={[
                 { value: 'High', label: 'High' },
@@ -198,13 +215,13 @@ export default function ContactDetailsView({
             />
           </div>
 
-          <div className="hidden sm:block h-6 w-[1.5px] bg-[#E5E7EB]" />
+          <div className="hidden sm:block h-6 w-[1.5px] bg-border" />
 
           {/* Edit Contact button */}
           <Button
             type="button"
             onClick={() => setShowEditSheet(true)}
-            className="h-9 px-3.5 border border-[#D1D5DB] text-xs font-semibold text-[#374151] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer flex items-center gap-1.5"
+            className="h-9 px-3.5 border border-border text-xs font-semibold text-foreground bg-card rounded-[6px] hover:bg-muted cursor-pointer flex items-center gap-1.5"
           >
             Edit
           </Button>
@@ -213,7 +230,7 @@ export default function ContactDetailsView({
           <Button
             type="button"
             onClick={() => setShowDealSheet(true)}
-            className="h-9 px-3.5 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer flex items-center gap-1.5"
+            className="h-9 px-3.5 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer flex items-center gap-1.5"
           >
             <Sparkles className="h-3.5 w-3.5" />
             Create Deal
@@ -224,22 +241,23 @@ export default function ContactDetailsView({
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
-                className="h-9 w-9 p-0 flex items-center justify-center border border-[#D1D5DB] rounded-[6px] hover:bg-slate-50 cursor-pointer"
+                aria-label="More actions"
+                className="h-9 w-9 p-0 flex items-center justify-center border border-border rounded-[6px] hover:bg-muted cursor-pointer"
               >
-                <MoreVertical className="h-4 w-4 text-[#374151]" />
+                <MoreVertical className="h-4 w-4 text-foreground" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-44 p-1 bg-white border border-[#E5E7EB] rounded-[6px] shadow-lg z-50">
+            <PopoverContent align="end" className="w-44 p-1 bg-card border border-border rounded-[6px] shadow-lg z-50">
               <button
                 type="button"
                 onClick={() => {
                   setEmailSubject(`Enterprise Relationship Brief - ${contact.company}`);
-                  setEmailBody(`Hi ${contact.name},\n\nI hope your week is off to an excellent start...\n\nBest regards,\n${contact.assignedTo || 'Sarah Jenkins'}`);
+                  setEmailBody(`Hi ${contact.name},\n\nI hope your week is off to an excellent start...\n\nBest regards,\n${contact.assignedTo || currentUser.name}`);
                   setShowEmailSheet(true);
                 }}
-                className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-[#F3F4F6] rounded flex items-center gap-2 cursor-pointer border-0"
+                className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-muted rounded flex items-center gap-2 cursor-pointer border-0"
               >
-                <Mail className="h-4 w-4 text-slate-500" />
+                <Mail className="h-4 w-4 text-muted-foreground" />
                 Send Email
               </button>
             </PopoverContent>
@@ -262,6 +280,8 @@ export default function ContactDetailsView({
           />
 
           <CRMAddressCard addressInfo={contact.addressInfo} />
+
+          <AttachmentsPanel entityType="Contact" entityId={contact.id} />
         </div>
 
         {/* RIGHT COLUMN: Interaction Tab logs (2/3) */}
@@ -290,11 +310,14 @@ export default function ContactDetailsView({
         onSave={handleProfileSave}
       />
 
-      <CRMOpportunityDealSheet 
+      <CRMOpportunityDealSheet
         open={showDealSheet}
         onOpenChange={setShowDealSheet}
         company={contact.company}
         assignedTo={contact.assignedTo}
+        contactName={contact.name}
+        contactEmail={contact.email}
+        contactPhone={contact.phone}
         onAddDeal={handleAddDealProxy}
       />
 

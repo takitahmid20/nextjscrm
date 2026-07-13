@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nextjscrm-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev", "-p", "3050", "-H", "0.0.0.0"],
+      "port": 3050
+    }
+  ]
+}

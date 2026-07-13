@@ -4,24 +4,29 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { 
-  Plus, 
-  Calendar, 
-  CheckSquare, 
-  Square, 
-  Trash2, 
-  CheckCircle2, 
-  Clock, 
-  Activity, 
-  PhoneCall, 
-  Mail, 
-  Users, 
+import {
+  Plus,
+  Calendar,
+  CheckSquare,
+  Square,
+  Trash2,
+  CheckCircle2,
+  Clock,
+  Activity,
+  PhoneCall,
+  Mail,
+  Users,
   Briefcase,
   X,
-  Play
+  Play,
+  Download,
+  Upload,
+  FolderSync,
 } from 'lucide-react';
 import { CRMTask, TaskPriority, TaskStatus } from '../types';
-import { CRM_USERS } from '../utils';
+import { CRM_USERS, exportTasksToCSV, parseCSVToTasks } from '../utils';
+import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,19 +39,34 @@ import { FormInput, FormSelect, FormDatePicker } from './forms/FormControls';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { UnifiedTable, UnifiedTableHeader } from './UnifiedTable';
 
+interface TaskImportResult {
+  importedCount: number;
+  errors: { row: number; message: string }[];
+}
+
 interface TasksViewProps {
   tasks: CRMTask[];
   onAddTask: (task: Omit<CRMTask, 'id'>) => void;
   onToggleTask: (id: string) => void;
   onDeleteTask: (id: string) => void;
+  onImportTasks: (rows: Record<string, unknown>[]) => Promise<TaskImportResult>;
 }
 
-export default function TasksView({ 
-  tasks, 
-  onAddTask, 
-  onToggleTask, 
-  onDeleteTask 
+export default function TasksView({
+  tasks,
+  onAddTask,
+  onToggleTask,
+  onDeleteTask,
+  onImportTasks
 }: TasksViewProps) {
+  const { showToast } = useToast();
+  const confirm = useConfirm();
+
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [csvContent, setCsvContent] = useState('');
+  const [csvError, setCsvError] = useState('');
+  const [importRowErrors, setImportRowErrors] = useState<{ row: number; message: string }[]>([]);
+
   // Navigation & Page filters
   const [priorityFilter, setPriorityFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('Pending');
@@ -68,7 +88,7 @@ export default function TasksView({
     resolver: zodResolver(taskSchema) as any,
     defaultValues: {
       title: '',
-      dueDate: '2026-05-30',
+      dueDate: new Date().toISOString().slice(0, 10),
       priority: 'Medium',
       assignedTo: 'Sarah Jenkins',
       category: 'Call',
@@ -95,6 +115,16 @@ export default function TasksView({
     });
   }, [tasks, priorityFilter, statusFilter, categoryFilter]);
 
+  // Upcoming pending schedules, soonest due date first — backs the sidebar
+  // summary with real task data instead of fabricated calendar events.
+  const upcomingTasks = useMemo(() => {
+    return tasks
+      .filter(t => t.status === 'Pending')
+      .slice()
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+      .slice(0, 5);
+  }, [tasks]);
+
   // Submit task constructor via React Hook Form schema validation
   const handleTaskSubmit = (values: TaskFormValues) => {
     onAddTask({
@@ -111,6 +141,109 @@ export default function TasksView({
     // Reset Form
     reset();
     setShowAddModal(false);
+    showToast(`Task "${values.title}" scheduled.`, 'success');
+  };
+
+  const handleDeleteTask = async (task: CRMTask) => {
+    const ok = await confirm({
+      title: 'Delete this task?',
+      description: `Do you want to permanently delete "${task.title}"? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    onDeleteTask(task.id);
+    showToast('Task deleted.', 'success');
+  };
+
+  // Exports the currently visible tasks as a real, client-generated .ics
+  // calendar file. There is no live sync with any external calendar provider —
+  // this simply lets a user pull their CRM schedule into whatever calendar
+  // app they already use.
+  const handleExportICS = () => {
+    if (filteredTasks.length === 0) {
+      showToast('No tasks in the current view to export.', 'info');
+      return;
+    }
+
+    const toICSDate = (dueDate: string) => {
+      const digitsOnly = dueDate.replace(/-/g, '');
+      return /^\d{8}$/.test(digitsOnly) ? digitsOnly : new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    };
+
+    const escapeICS = (value: string) => value.replace(/[\\,;]/g, (match) => `\\${match}`).replace(/\n/g, '\\n');
+
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+
+    const events = filteredTasks.map((task, idx) => [
+      'BEGIN:VEVENT',
+      `UID:${task.id}-${idx}@crm-tasks-export`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${toICSDate(task.dueDate)}`,
+      `SUMMARY:${escapeICS(task.title)}`,
+      `DESCRIPTION:${escapeICS(`${task.category} • ${task.priority} priority • Assigned to ${task.assignedTo}`)}`,
+      'END:VEVENT',
+    ].join('\r\n'));
+
+    const icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//CRM Task Schedules//Export//EN',
+      'CALSCALE:GREGORIAN',
+      ...events,
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `crm_tasks_export_${new Date().toISOString().slice(0, 10)}.ics`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast(`Exported ${filteredTasks.length} task(s) to .ics.`, 'success');
+  };
+
+  const handleExportCSV = () => {
+    const csvStr = exportTasksToCSV(tasks);
+    const blob = new Blob([csvStr], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `centric_crm_tasks_export_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportSubmit = async () => {
+    if (!csvContent.trim()) {
+      setCsvError('Please paste or load CSV text content.');
+      setImportRowErrors([]);
+      return;
+    }
+    try {
+      const parsed = parseCSVToTasks(csvContent);
+      if (parsed.length === 0) {
+        setCsvError('No valid tasks parsed. Verify heading structure.');
+        setImportRowErrors([]);
+        return;
+      }
+      setCsvError('');
+      const result = await onImportTasks(parsed);
+      setImportRowErrors(result.errors);
+      if (result.errors.length === 0) {
+        setShowImportModal(false);
+        setCsvContent('');
+      } else {
+        setCsvError(`${result.importedCount} row(s) imported, ${result.errors.length} row(s) failed:`);
+      }
+    } catch (e: any) {
+      setCsvError('Failed parsing CSV lines. ' + (e?.message ?? ''));
+      setImportRowErrors([]);
+    }
   };
 
   const completedCount = tasks.filter(t => t.status === 'Completed').length;
@@ -131,28 +264,48 @@ export default function TasksView({
       {/* Page Title & Stats */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-3 md:space-y-0">
         <div>
-          <h1 className="text-28px font-semibold text-[#111827] tracking-tight">CRM Task & Activity Schedules</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-28px font-semibold text-foreground tracking-tight">CRM Task & Activity Schedules</h1>
+          <p className="text-sm text-muted-foreground">
             Review salesperson follow-up schedules, schedule introduction calls, and record client responses.
           </p>
         </div>
 
         <div className="flex items-center space-x-2.5">
           {/* Quick Tasks Summary counter */}
-          <div className="bg-white border border-[#E5E7EB] px-3.5 py-1.5 rounded-[6px] text-xs flex items-center space-x-3 text-[#6B7280] font-sans">
+          <div className="bg-card border border-border px-3.5 py-1.5 rounded-[6px] text-xs flex items-center space-x-3 text-muted-foreground font-sans">
             <span>
-              Pending: <strong className="text-amber-600">{pendingCount}</strong>
+              Pending: <strong className="text-amber-600 dark:text-amber-400">{pendingCount}</strong>
             </span>
-            <span className="h-3 w-[1px] bg-[#E5E7EB]" />
+            <span className="h-3 w-[1px] bg-border" />
             <span>
-              Completed: <strong className="text-emerald-600">{completedCount}</strong>
+              Completed: <strong className="text-emerald-600 dark:text-emerald-400">{completedCount}</strong>
             </span>
           </div>
 
           <Button
+            id="btn-import-tasks-csv"
+            onClick={() => setShowImportModal(true)}
+            variant="outline"
+            className="h-10 px-3.5 bg-card border border-border hover:bg-primary/10 text-foreground hover:text-primary text-[13px] font-medium rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <Upload className="h-4 w-4 text-muted-foreground" />
+            Import CSV
+          </Button>
+
+          <Button
+            id="btn-export-tasks-csv"
+            onClick={handleExportCSV}
+            variant="outline"
+            className="h-10 px-3.5 bg-card border border-border hover:bg-primary/10 text-foreground hover:text-primary text-[13px] font-medium rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <Download className="h-4 w-4 text-muted-foreground" />
+            Export CSV
+          </Button>
+
+          <Button
             id="btn-add-task-modal"
             onClick={() => setShowAddModal(true)}
-            className="h-10 px-4 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-[13px] font-medium rounded-[6px] transition-all flex items-center gap-1.5 cursor-pointer shadow-sm animate-none"
+            className="h-10 px-4 bg-primary hover:bg-primary/90 text-primary-foreground text-[13px] font-medium rounded-[6px] transition-all flex items-center gap-1.5 cursor-pointer shadow-sm animate-none"
           >
             <Plus className="h-4.5 w-4.5" />
             Schedule Follow-up
@@ -160,26 +313,27 @@ export default function TasksView({
         </div>
       </div>
 
-      {/* Grid: Main Tasks Table & Compact Calendars */}
+      {/* Grid: Main Tasks Table & Real Upcoming Schedule Summary */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        
+
         {/* Left Column: Tasks spreadsheets with filters - Span 3 */}
         <div className="lg:col-span-3 space-y-4">
-          
+
           {/* Tasks filters toolbar box */}
-          <Card className="bg-white border border-[#E5E7EB] rounded-[8px] p-4 flex flex-wrap items-center gap-3.5 text-xs">
-            
+          <Card className="bg-card border border-border rounded-[8px] p-4 flex flex-row flex-wrap items-center gap-3.5 text-xs">
+
             {/* Status switcher pills */}
-            <div className="bg-[#F5F6F8] border border-[#E5E7EB] rounded-[6px] p-0.5 flex space-x-0.5">
+            <div className="bg-muted border border-border rounded-[6px] p-0.5 flex space-x-0.5">
               <Button
                 id="btn-tasks-pending-filter"
                 onClick={() => setStatusFilter('Pending')}
                 size="sm"
                 variant={statusFilter === 'Pending' ? 'default' : 'ghost'}
+                aria-pressed={statusFilter === 'Pending'}
                 className={`px-3 py-1.5 rounded-[4px] text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
-                  statusFilter === 'Pending' 
-                    ? 'bg-[#2563EB] text-white font-medium' 
-                    : 'text-[#6B7280] hover:text-[#111827]'
+                  statusFilter === 'Pending'
+                    ? 'bg-primary text-primary-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 Pending Focus
@@ -189,10 +343,11 @@ export default function TasksView({
                 onClick={() => setStatusFilter('Completed')}
                 size="sm"
                 variant={statusFilter === 'Completed' ? 'default' : 'ghost'}
+                aria-pressed={statusFilter === 'Completed'}
                 className={`px-3 py-1.5 rounded-[4px] text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
-                  statusFilter === 'Completed' 
-                    ? 'bg-[#2563EB] text-white font-medium' 
-                    : 'text-[#6B7280] hover:text-[#111827]'
+                  statusFilter === 'Completed'
+                    ? 'bg-primary text-primary-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 Archive logs
@@ -202,10 +357,11 @@ export default function TasksView({
                 onClick={() => setStatusFilter('All')}
                 size="sm"
                 variant={statusFilter === 'All' ? 'default' : 'ghost'}
+                aria-pressed={statusFilter === 'All'}
                 className={`px-3 py-1.5 rounded-[4px] text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
-                  statusFilter === 'All' 
-                    ? 'bg-[#2563EB] text-white font-medium' 
-                    : 'text-[#6B7280] hover:text-[#111827]'
+                  statusFilter === 'All'
+                    ? 'bg-primary text-primary-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 All Workpacks
@@ -213,11 +369,11 @@ export default function TasksView({
             </div>
 
             {/* Separator */}
-            <span className="h-4 w-[1px] bg-[#E5E7EB] mx-1 md:block hidden" />
+            <span className="h-4 w-[1px] bg-border mx-1 md:block hidden" />
 
             {/* Priority Filter */}
             <div className="flex items-center space-x-1.5">
-              <span className="text-[#6B7280] font-sans text-[11px] font-semibold uppercase tracking-wider select-none">Priority:</span>
+              <span className="text-muted-foreground font-sans text-[11px] font-semibold uppercase tracking-wider select-none">Priority:</span>
               <FormSelect
                 value={priorityFilter}
                 onChange={(val) => setPriorityFilter(val)}
@@ -234,7 +390,7 @@ export default function TasksView({
 
             {/* Activity Category Filter */}
             <div className="flex items-center space-x-1.5">
-              <span className="text-[#6B7280] font-sans text-[11px] font-semibold uppercase tracking-wider select-none">Category:</span>
+              <span className="text-muted-foreground font-sans text-[11px] font-semibold uppercase tracking-wider select-none">Category:</span>
               <FormSelect
                 value={categoryFilter}
                 onChange={(val) => setCategoryFilter(val)}
@@ -246,8 +402,8 @@ export default function TasksView({
                 className="w-44"
               />
             </div>
-            
-            <span className="ml-auto text-xs text-[#6B7280] font-medium hidden sm:inline">
+
+            <span className="ml-auto text-xs text-muted-foreground font-medium hidden sm:inline">
               Showing <strong>{filteredTasks.length}</strong> schedules
             </span>
           </Card>
@@ -262,37 +418,39 @@ export default function TasksView({
               const isCompleted = task.status === 'Completed';
 
               // Fine-grain priority indicator style
-              let priorityClass = 'bg-gray-100 text-gray-800 border-gray-200';
-              if (task.priority === 'High') priorityClass = 'bg-red-50 text-red-800 border-red-150';
-              else if (task.priority === 'Medium') priorityClass = 'bg-amber-50 text-amber-850 border-amber-150';
+              let priorityClass = 'bg-muted text-muted-foreground border-border';
+              if (task.priority === 'High') priorityClass = 'bg-destructive/10 text-destructive border-destructive/20';
+              else if (task.priority === 'Medium') priorityClass = 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900/40';
 
               // Category rendering symbols
               let catIcon = <CheckSquare className="h-3.5 w-3.5" />;
-              if (task.category === 'Call') catIcon = <PhoneCall className="h-3.5 w-3.5 text-[#2563EB]" />;
-              else if (task.category === 'Email') catIcon = <Mail className="h-3.5 w-3.5 text-[#2563EB]" />;
-              else if (task.category === 'Meeting') catIcon = <Calendar className="h-3.5 w-3.5 text-indigo-600" />;
+              if (task.category === 'Call') catIcon = <PhoneCall className="h-3.5 w-3.5 text-primary" />;
+              else if (task.category === 'Email') catIcon = <Mail className="h-3.5 w-3.5 text-primary" />;
+              else if (task.category === 'Meeting') catIcon = <Calendar className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />;
 
               return (
-                <tr 
-                  key={task.id} 
-                  className={`h-12 hover:bg-[#F5F6F8]/60 transition-colors border-b border-[#E5E7EB] ${
-                    isCompleted ? 'bg-slate-50/70 text-[#6B7280]' : ''
+                <tr
+                  key={task.id}
+                  className={`h-12 hover:bg-muted/60 transition-colors border-b border-border ${
+                    isCompleted ? 'bg-muted/40 text-muted-foreground' : ''
                   }`}
                 >
                   {/* Toggle Task Complete checkbox */}
                   <td className="py-2 px-4 text-center">
                     <button
                       id={`btn-toggle-task-${task.id}`}
+                      type="button"
                       onClick={() => {
                         onToggleTask(task.id);
                       }}
-                      className="text-[#6B7280] hover:text-[#2563EB] transition-colors p-1 cursor-pointer"
+                      className="text-muted-foreground hover:text-primary transition-colors p-1 cursor-pointer"
+                      aria-label={isCompleted ? `Mark "${task.title}" as pending` : `Mark "${task.title}" as completed`}
                       title={isCompleted ? "Mark as pending" : "Mark as completed"}
                     >
                       {isCompleted ? (
-                        <CheckSquare className="h-4.5 w-4.5 text-[#2563EB]" />
+                        <CheckSquare className="h-4.5 w-4.5 text-primary" />
                       ) : (
-                        <Square className="h-4.5 w-4.5 text-[#E5E7EB]" />
+                        <Square className="h-4.5 w-4.5 text-border" />
                       )}
                     </button>
                   </td>
@@ -300,8 +458,8 @@ export default function TasksView({
                   {/* Title */}
                   <td className="py-2 px-4">
                     <div className="flex items-center space-x-2.5 select-all">
-                      <span className="p-1 bg-[#EFF6FF] rounded">{catIcon}</span>
-                      <span className={`font-semibold text-xs text-[#111827] ${isCompleted ? 'line-through text-[#6B7280]' : ''}`}>
+                      <span className="p-1 bg-primary/10 rounded">{catIcon}</span>
+                      <span className={`font-semibold text-xs text-foreground ${isCompleted ? 'line-through text-muted-foreground' : ''}`}>
                         {task.title}
                       </span>
                     </div>
@@ -310,17 +468,17 @@ export default function TasksView({
                   {/* Related CRM entity */}
                   <td className="py-2 px-4">
                     {task.relatedToType !== 'None' ? (
-                      <div className="flex items-center space-x-1 font-semibold text-[11px] text-[#6B7280]">
-                        {task.relatedToType === 'Lead' ? <Users className="h-3 w-3 text-blue-500" /> : <Briefcase className="h-3 w-3 text-indigo-500" />}
-                        <span className="hover:text-blue-600 transition-colors uppercase">{task.relatedToName}</span>
+                      <div className="flex items-center space-x-1 font-semibold text-[11px] text-muted-foreground">
+                        {task.relatedToType === 'Lead' ? <Users className="h-3 w-3 text-primary" /> : <Briefcase className="h-3 w-3 text-indigo-500" />}
+                        <span className="hover:text-primary transition-colors uppercase">{task.relatedToName}</span>
                       </div>
                     ) : (
-                      <span className="text-[#6B7280] italic">General schedule</span>
+                      <span className="text-muted-foreground italic">General schedule</span>
                     )}
                   </td>
 
                   {/* Due Date */}
-                  <td className="py-2 px-4 font-mono font-medium text-[#6B7280]">
+                  <td className="py-2 px-4 font-mono font-medium text-muted-foreground">
                     {task.dueDate}
                   </td>
 
@@ -332,7 +490,7 @@ export default function TasksView({
                   </td>
 
                   {/* Assigned Agent */}
-                  <td className="py-2 px-4 font-medium text-[#111827]">
+                  <td className="py-2 px-4 font-medium text-foreground">
                     {task.assignedTo}
                   </td>
 
@@ -340,8 +498,10 @@ export default function TasksView({
                   <td className="py-2 px-4 text-center">
                     <button
                       id={`btn-delete-task-${task.id}`}
-                      onClick={() => onDeleteTask(task.id)}
-                      className="p-1 hover:bg-red-50 text-[#6B7280] hover:text-red-700 rounded transition-colors cursor-pointer"
+                      type="button"
+                      onClick={() => handleDeleteTask(task)}
+                      className="p-1 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded transition-colors cursor-pointer"
+                      aria-label={`Delete task "${task.title}"`}
                       title="Delete task assignment"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -354,53 +514,46 @@ export default function TasksView({
 
         </div>
 
-        {/* Right Column: Office Corporate Calendar & Meetings List - Span 1 */}
+        {/* Right Column: Real upcoming schedule summary & calendar export - Span 1 */}
         <div className="space-y-4">
-          
-          <div className="bg-white border border-[#E5E7EB] rounded-[8px] p-4 select-none">
-            <div className="pb-3 border-b border-[#E5E7EB] mb-4 flex items-center justify-between text-[#111827]">
+
+          <div className="bg-card border border-border rounded-[8px] p-4 select-none">
+            <div className="pb-3 border-b border-border mb-4 flex items-center justify-between text-foreground">
               <div className="flex items-center space-x-1.5 font-bold">
-                <Calendar className="h-4.5 w-4.5 text-[#2563EB]" />
-                <span className="text-xs uppercase tracking-wider">Corporate Agenda Sync</span>
+                <Calendar className="h-4.5 w-4.5 text-primary" />
+                <span className="text-xs uppercase tracking-wider">Upcoming Schedule</span>
               </div>
-              <span className="text-[10px] font-mono bg-[#EFF6FF] text-[#2563EB] px-1.5 py-0.5 rounded font-bold uppercase">QA Sync</span>
+              <span className="text-[10px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded font-bold uppercase">Live</span>
             </div>
 
-            {/* Simple mini planner design */}
+            {/* Real upcoming pending tasks, soonest due date first */}
             <div className="space-y-3">
-              <div className="p-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs">
-                <div className="flex justify-between items-center text-[#6B7280] font-mono text-[10px] mb-1 font-bold">
-                  <span>TODAY • 14:00 UTC</span>
-                  <span className="h-2 w-2 rounded-full bg-[#2563EB]"></span>
-                </div>
-                <h5 className="font-bold text-[#111827]">Executive Demo: Apex CRM</h5>
-                <p className="text-[11px] text-[#6B7280] mt-1 pr-1 leading-normal">Sarah Chen and team integration engineers to present API pipelines.</p>
-              </div>
-
-              <div className="p-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs">
-                <div className="flex justify-between items-center text-[#6B7280] font-mono text-[10px] mb-1 font-bold">
-                  <span>TOMORROW • 09:30 UTC</span>
-                  <span className="h-2 w-2 rounded-full bg-amber-500"></span>
-                </div>
-                <h5 className="font-bold text-[#111827]">Licensing Negotiation Call</h5>
-                <p className="text-[11px] text-[#6B7280] mt-1 pr-1 leading-normal">Review bulk pricing brackets with VP of Global Retail Corp procurement.</p>
-              </div>
-
-              <div className="p-3 bg-white border border-[#E5E7EB] rounded-[6px] text-xs">
-                <div className="flex justify-between items-center text-[#6B7280] font-mono text-[10px] mb-1 font-semibold">
-                  <span>JUNE 04, 2026</span>
-                </div>
-                <h5 className="font-bold text-[#111827]">Acme Q2 Sales Audit</h5>
-                <p className="text-[11px] text-[#6B7280] mt-1 pr-1 leading-normal">Quarterly operations report, CSV downloads audit, and pipeline cleanups.</p>
-              </div>
+              {upcomingTasks.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic py-4 text-center">No pending tasks scheduled.</p>
+              ) : (
+                upcomingTasks.map((task) => (
+                  <div key={task.id} className="p-3 bg-card border border-border rounded-[6px] text-xs">
+                    <div className="flex justify-between items-center text-muted-foreground font-mono text-[10px] mb-1 font-bold">
+                      <span>{task.dueDate}</span>
+                      <span className={`h-2 w-2 rounded-full ${task.priority === 'High' ? 'bg-destructive' : task.priority === 'Medium' ? 'bg-amber-500' : 'bg-muted-foreground'}`}></span>
+                    </div>
+                    <h5 className="font-bold text-foreground">{task.title}</h5>
+                    <p className="text-[11px] text-muted-foreground mt-1 pr-1 leading-normal">
+                      {task.category} • Assigned to {task.assignedTo}
+                    </p>
+                  </div>
+                ))
+              )}
             </div>
 
-            <div className="h-[1px] bg-[#E5E7EB] my-4" />
-            <button 
-              onClick={() => alert("CRM Calendar system is verified. Sync with Microsoft Exchange/Google Workspace is operational in central workspace setting.")}
-              className="w-full py-2 border border-[#E5E7EB] hover:bg-slate-50 text-center font-bold text-[#111827] rounded-[4px] text-[11px] cursor-pointer"
+            <div className="h-[1px] bg-border my-4" />
+            <button
+              type="button"
+              onClick={handleExportICS}
+              className="w-full py-2 border border-border hover:bg-muted text-center font-bold text-foreground rounded-[4px] text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
             >
-              Export Global iCal
+              <Download className="h-3.5 w-3.5" />
+              Export Visible Tasks (.ics)
             </button>
           </div>
 
@@ -410,13 +563,13 @@ export default function TasksView({
 
       {/* SIDE PANEL: CREATE NEW TASK SCHEDULES */}
       <Sheet open={showAddModal} onOpenChange={setShowAddModal}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full">
-          <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F5F6F8]">
-            <SheetTitle className="font-semibold text-[#111827] text-[15px]">Schedule Follow-up Action</SheetTitle>
+        <SheetContent side="right" className="w-full sm:max-w-2xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full">
+          <SheetHeader className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted">
+            <SheetTitle className="font-semibold text-foreground text-[15px]">Schedule Follow-up Action</SheetTitle>
           </SheetHeader>
 
-          <form onSubmit={handleSubmit(handleTaskSubmit)} className="flex-1 overflow-y-auto p-5 space-y-4 text-xs text-[#111827] crm-scrollbar">
-            
+          <form onSubmit={handleSubmit(handleTaskSubmit)} className="flex-1 overflow-y-auto p-5 space-y-4 text-xs text-foreground crm-scrollbar">
+
             <FormInput
               label="Follow-up Action Title"
               register={register('title')}
@@ -425,7 +578,7 @@ export default function TasksView({
               placeholder="e.g. Schedule onboarding demo followups"
             />
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormSelect
                 label="Action Category"
                 register={register('category')}
@@ -442,7 +595,7 @@ export default function TasksView({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormSelect
                 label="Task Urgency Priority"
                 register={register('priority')}
@@ -462,7 +615,7 @@ export default function TasksView({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormSelect
                 label="Related Lead/Deal Context"
                 register={register('relatedToType')}
@@ -485,7 +638,7 @@ export default function TasksView({
               )}
             </div>
 
-            <div className="pt-3 border-t border-[#E5E7EB] flex items-center justify-end space-x-2">
+            <div className="pt-3 border-t border-border flex items-center justify-end space-x-2">
               <Button
                 type="button"
                 variant="outline"
@@ -493,20 +646,97 @@ export default function TasksView({
                   reset();
                   setShowAddModal(false);
                 }}
-                className="h-9 px-4 border border-[#E5E7EB] text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 font-medium cursor-pointer"
+                className="h-9 px-4 border border-border text-foreground bg-card rounded-[6px] hover:bg-muted font-medium cursor-pointer"
               >
                 Close panel
               </Button>
               <Button
                 id="btn-task-form-submit"
                 type="submit"
-                className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] font-bold rounded-[6px] cursor-pointer"
+                className="h-9 px-4 bg-primary text-primary-foreground hover:bg-primary/90 font-bold rounded-[6px] cursor-pointer"
               >
                 Schedule task
               </Button>
             </div>
 
           </form>
+        </SheetContent>
+      </Sheet>
+
+      {/* SIDE PANEL: IMPORT CSV CONSOLE */}
+      <Sheet open={showImportModal} onOpenChange={setShowImportModal}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full">
+          <SheetHeader className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted">
+            <div className="flex items-center space-x-2">
+              <FolderSync className="h-4.5 w-4.5 text-primary" />
+              <SheetTitle className="font-semibold text-foreground text-[15px]">Bulk CSV Task Importer</SheetTitle>
+            </div>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto p-5 space-y-4 crm-scrollbar">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Provide a raw CSV dataset representing follow-up tasks. Your column headers should map to:
+              <code className="bg-primary/10 text-primary px-1 py-0.5 rounded ml-1 font-mono font-bold text-[10px]">
+                Task Title, Due Date, Priority, Category, Assigned User
+              </code>.
+            </p>
+
+            <div>
+              <label htmlFor="task-csv-content" className="block text-xs font-semibold text-foreground mb-1.5">Insert raw text below:</label>
+              <textarea
+                id="task-csv-content"
+                rows={7}
+                value={csvContent}
+                aria-invalid={!!csvError}
+                aria-describedby={csvError ? 'task-csv-error' : undefined}
+                onChange={(e) => {
+                  setCsvContent(e.target.value);
+                  setCsvError('');
+                  setImportRowErrors([]);
+                }}
+                placeholder='Task Title,Due Date,Priority,Category,Assigned User&#10;"Follow up on proposal","2026-08-15","High","Call","Sarah Jenkins"'
+                className="w-full p-3 font-mono text-[11px] border border-border rounded-[6px] outline-none focus:border-primary bg-muted crm-scrollbar"
+              />
+
+              {csvError && (
+                <p id="task-csv-error" className="text-[11px] text-destructive font-medium mt-1">{csvError}</p>
+              )}
+              {importRowErrors.length > 0 && (
+                <ul className="mt-1 space-y-0.5 text-[11px] text-destructive list-disc list-inside">
+                  {importRowErrors.map((rowError, idx) => (
+                    <li key={idx}>row {rowError.row}: {rowError.message}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-border flex items-center justify-between">
+              <span className="text-[10px] text-muted-foreground">Supports standard RFC-4180 parsing compliance</span>
+              <div className="flex items-center space-x-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowImportModal(false);
+                    setCsvContent('');
+                    setCsvError('');
+                    setImportRowErrors([]);
+                  }}
+                  className="h-9 px-4 border border-border text-xs text-foreground bg-card rounded-[6px] hover:bg-muted cursor-pointer"
+                >
+                  Discard
+                </Button>
+                <Button
+                  id="btn-import-tasks-submit"
+                  type="button"
+                  onClick={handleImportSubmit}
+                  className="h-9 px-4 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer"
+                >
+                  Integrate Records
+                </Button>
+              </div>
+            </div>
+          </div>
         </SheetContent>
       </Sheet>
 

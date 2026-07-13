@@ -1,8 +1,28 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Lead, Deal, CRMTask, Activity, DealStage, TaskStatus, Contact } from '../types';
-import { getSavedCRMData, saveCRMData, INITIAL_LEADS, INITIAL_DEALS, INITIAL_TASKS, INITIAL_ACTIVITIES, INITIAL_CONTACTS } from '../utils';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { Lead, Deal, CRMTask, Activity, DealStage, Contact, Account } from '../types';
+import { leadsApi } from '../lib/api/leads';
+import { contactsApi } from '../lib/api/contacts';
+import { dealsApi } from '../lib/api/deals';
+import { tasksApi } from '../lib/api/tasks';
+import { activitiesApi } from '../lib/api/activities';
+import { accountsApi } from '../lib/api/accounts';
+import { ApiError } from '../lib/api/http';
+import { useAuth } from './AuthContext';
+import { useToast } from './ToastContext';
+
+// Large enough to behave like "fetch everything" for a mock-scale dataset —
+// every consuming view still does its own client-side filter/sort/paginate
+// on top of this array. A real backend at scale should move that logic
+// server-side and have views call the paginated `leadsApi.list({page, ...})`
+// directly instead of relying on this "load it all up front" shape.
+const LIST_ALL_PAGE_SIZE = 1000;
 
 interface CRMContextType {
   leads: Lead[];
@@ -10,363 +30,346 @@ interface CRMContextType {
   contacts: Contact[];
   tasks: CRMTask[];
   activities: Activity[];
+  accounts: Account[];
   currentUser: { name: string; role: string };
+  loading: boolean;
   collapsedSidebar: boolean;
   workspace: string;
   globalSearch: string;
   setCollapsedSidebar: (val: boolean) => void;
   setWorkspace: (val: string) => void;
   setGlobalSearch: (val: string) => void;
-  addLead: (lead: Omit<Lead, 'id' | 'createdAt' | 'lastActivity'>) => void;
-  updateLead: (id: string, fields: Partial<Lead>) => void;
-  deleteLeads: (ids: string[]) => void;
-  importLeads: (leads: Partial<Lead>[]) => void;
-  addDeal: (deal: Omit<Deal, 'id' | 'createdAt'>) => void;
-  updateDealStage: (id: string, stage: DealStage) => void;
-  updateDealStatus: (id: string, status: 'Open' | 'Won' | 'Lost') => void;
-  deleteDeal: (id: string) => void;
-  addContact: (contact: Omit<Contact, 'id' | 'createdAt' | 'lastActivity'>) => void;
-  updateContact: (id: string, fields: Partial<Contact>) => void;
-  deleteContacts: (ids: string[]) => void;
-  importContacts: (contacts: Partial<Contact>[]) => void;
-  addTask: (task: Omit<CRMTask, 'id'>) => void;
-  toggleTask: (id: string) => void;
-  deleteTask: (id: string) => void;
-  resetData: () => void;
-  updateCurrentUser: (name: string, role: string) => void;
+  addLead: (lead: Omit<Lead, 'id' | 'createdAt' | 'lastActivity'>) => Promise<void>;
+  updateLead: (id: string, fields: Partial<Lead>) => Promise<void>;
+  deleteLeads: (ids: string[]) => Promise<void>;
+  importLeads: (rows: Record<string, unknown>[]) => Promise<{ importedCount: number; errors: { row: number; message: string }[] }>;
+  addDeal: (deal: Omit<Deal, 'id' | 'createdAt'>) => Promise<void>;
+  updateDeal: (id: string, fields: Partial<Deal>) => Promise<void>;
+  updateDealStage: (id: string, stage: DealStage) => Promise<void>;
+  updateDealStatus: (id: string, status: 'Open' | 'Won' | 'Lost') => Promise<void>;
+  deleteDeal: (id: string) => Promise<void>;
+  addContact: (contact: Omit<Contact, 'id' | 'createdAt' | 'lastActivity'>) => Promise<void>;
+  updateContact: (id: string, fields: Partial<Contact>) => Promise<void>;
+  deleteContacts: (ids: string[]) => Promise<void>;
+  importContacts: (rows: Record<string, unknown>[]) => Promise<{ importedCount: number; errors: { row: number; message: string }[] }>;
+  addTask: (task: Omit<CRMTask, 'id'>) => Promise<void>;
+  toggleTask: (id: string) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+  importDeals: (rows: Record<string, unknown>[]) => Promise<{ importedCount: number; errors: { row: number; message: string }[] }>;
+  importTasks: (rows: Record<string, unknown>[]) => Promise<{ importedCount: number; errors: { row: number; message: string }[] }>;
+  addAccount: (account: Omit<Account, 'id' | 'createdAt'>) => Promise<void>;
+  updateAccount: (id: string, fields: Partial<Account>) => Promise<void>;
+  deleteAccount: (id: string) => Promise<void>;
+  resetData: () => Promise<void>;
+  updateCurrentUser: (name: string, role: string) => Promise<void>;
 }
 
 const CRMContext = createContext<CRMContextType | undefined>(undefined);
 
 export function CRMProvider({ children }: { children: React.ReactNode }) {
+  const { user, status: authStatus, updateProfile } = useAuth();
+  const { showToast } = useToast();
+
   const [leads, setLeads] = useState<Lead[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tasks, setTasks] = useState<CRMTask[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [loading, setLoading] = useState(true);
   const [collapsedSidebar, setCollapsedSidebar] = useState<boolean>(false);
   const [workspace, setWorkspace] = useState<string>('US_EAST_PROD');
   const [globalSearch, setGlobalSearch] = useState<string>('');
-  const [currentUser, setCurrentUser] = useState({
-    name: 'Sarah Jenkins',
-    role: 'Sales Director'
-  });
 
-  // Load from local storage on mount
-  useEffect(() => {
-    const data = getSavedCRMData();
-    setLeads(data.leads);
-    setDeals(data.deals);
-    setTasks(data.tasks);
-    setActivities(data.activities);
-    setContacts(data.contacts || []);
+  const currentUser = { name: user?.name ?? 'Guest', role: user?.role ?? '' };
+
+  const reportError = useCallback((error: unknown, fallback: string) => {
+    const message = error instanceof ApiError ? error.message : fallback;
+    showToast(message, 'error');
+  }, [showToast]);
+
+  const refetchLeads = useCallback(async () => {
+    const result = await leadsApi.list({ pageSize: LIST_ALL_PAGE_SIZE });
+    setLeads(result.items);
+  }, []);
+  const refetchContacts = useCallback(async () => {
+    const result = await contactsApi.list({ pageSize: LIST_ALL_PAGE_SIZE });
+    setContacts(result.items);
+  }, []);
+  const refetchDeals = useCallback(async () => {
+    const result = await dealsApi.list({ pageSize: LIST_ALL_PAGE_SIZE });
+    setDeals(result.items);
+  }, []);
+  const refetchTasks = useCallback(async () => {
+    const result = await tasksApi.list({ pageSize: LIST_ALL_PAGE_SIZE });
+    setTasks(result.items);
+  }, []);
+  const refetchActivities = useCallback(async () => {
+    setActivities(await activitiesApi.list());
+  }, []);
+  const refetchAccounts = useCallback(async () => {
+    const result = await accountsApi.list({ pageSize: LIST_ALL_PAGE_SIZE });
+    setAccounts(result.items);
   }, []);
 
-  const persistChanges = (
-    newLeads: Lead[], 
-    newDeals: Deal[], 
-    newTasks: CRMTask[], 
-    newActivities: Activity[],
-    newContacts?: Contact[]
-  ) => {
-    const finalContacts = newContacts !== undefined ? newContacts : contacts;
-    setLeads(newLeads);
-    setDeals(newDeals);
-    setTasks(newTasks);
-    setActivities(newActivities);
-    if (newContacts !== undefined) {
-      setContacts(newContacts);
+  useEffect(() => {
+    if (authStatus !== 'authenticated') {
+      if (authStatus === 'unauthenticated') setLoading(false);
+      return;
     }
-    saveCRMData(newLeads, newDeals, newTasks, newActivities, finalContacts);
-  };
+    setLoading(true);
+    Promise.all([refetchLeads(), refetchContacts(), refetchDeals(), refetchTasks(), refetchActivities(), refetchAccounts()])
+      .catch((error) => reportError(error, 'Failed to load workspace data.'))
+      .finally(() => setLoading(false));
+  }, [authStatus, refetchLeads, refetchContacts, refetchDeals, refetchTasks, refetchActivities, refetchAccounts, reportError]);
 
-  // Helper to append a new activity log
-  const logActivity = (
-    type: Activity['type'],
-    description: string,
-    entityName?: string,
-    value?: number
-  ): Activity[] => {
-    const newActivity: Activity = {
-      id: `ACT-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      type,
-      user: currentUser.name,
-      description,
-      entityName,
-      value
-    };
-    return [newActivity, ...activities];
-  };
-
-  // Generic entity creation helper
-  const addEntity = <T extends { id: string; createdAt: string; lastActivity: string }>(
-    entityInput: any,
-    prefix: 'LD' | 'CON'
-  ): T => {
-    return {
-      ...entityInput,
-      id: `${prefix}-${Math.floor(100 + Math.random() * 900)}`,
-      createdAt: new Date().toISOString(),
-      lastActivity: new Date().toISOString()
-    } as unknown as T;
-  };
-
-  // Generic entity update helper
-  const updateEntityRecord = <T extends { id: string; lastActivity: string }>(
-    id: string,
-    updatedFields: Partial<T>,
-    list: T[]
-  ): T[] => {
-    return list.map(item => {
-      if (item.id === id) {
-        return { ...item, ...updatedFields, lastActivity: new Date().toISOString() };
-      }
-      return item;
-    });
-  };
-
-  // Generic list importer helper
-  const importEntitiesList = <T extends { id: string; createdAt: string; lastActivity: string; notes?: string }>(
-    newImported: Partial<T>[],
-    prefix: 'LD' | 'CON',
-    rowMapper: (item: Partial<T>) => Partial<T>
-  ): T[] => {
-    return newImported.map((part) => {
-      const parsedPart = rowMapper(part);
-      return {
-        ...parsedPart,
-        id: `${prefix}-${Math.floor(100 + Math.random() * 900)}`,
-        createdAt: new Date().toISOString(),
-        lastActivity: new Date().toISOString(),
-        notes: parsedPart.notes || 'Acquired through bulk database CSV import.'
-      } as unknown as T;
-    });
-  };
-
-  const addLead = (leadInput: Omit<Lead, 'id' | 'createdAt' | 'lastActivity'>) => {
-    const freshLead = addEntity<Lead>(leadInput, 'LD');
-    const updated = [freshLead, ...leads];
-    const description = `Registered new lead account: ${freshLead.name} (${freshLead.company}).`;
-    const nextActivities = logActivity('lead_created', description, freshLead.name, freshLead.dealValue);
-    persistChanges(updated, deals, tasks, nextActivities);
-  };
-
-  const updateLead = (id: string, updatedFields: Partial<Lead>) => {
-    const updated = updateEntityRecord<Lead>(id, updatedFields, leads);
-    const leadObj = leads.find(l => l.id === id);
-    let nextActivities = [...activities];
-    if (updatedFields.status && leadObj && leadObj.status !== updatedFields.status) {
-      const description = `Updated status of "${leadObj.name}" to ${updatedFields.status}.`;
-      nextActivities = [
-        {
-          id: `ACT-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          type: 'stage_changed',
-          user: currentUser.name,
-          description,
-          entityName: leadObj.name
-        },
-        ...activities
-      ];
+  // ---------------------------------------------------------------------
+  // Leads
+  // ---------------------------------------------------------------------
+  const addLead = async (leadInput: Omit<Lead, 'id' | 'createdAt' | 'lastActivity'>) => {
+    try {
+      await leadsApi.create(leadInput);
+      await Promise.all([refetchLeads(), refetchActivities()]);
+      showToast(`Lead "${leadInput.name}" created.`, 'success');
+    } catch (error) {
+      reportError(error, 'Could not create lead.');
     }
-    persistChanges(updated, deals, tasks, nextActivities);
   };
 
-  const deleteLeads = (ids: string[]) => {
-    const updated = leads.filter(l => !ids.includes(l.id));
-    const description = `Permanently purged ${ids.length} lead account folder records.`;
-    const nextActivities = logActivity('lead_created', description);
-    persistChanges(updated, deals, tasks, nextActivities);
-  };
-
-  const importLeads = (newImportedLeads: Partial<Lead>[]) => {
-    const resolved = importEntitiesList<Lead>(newImportedLeads, 'LD', part => ({
-      name: part.name || 'Imported Lead',
-      company: part.company || 'Enterprise Corp',
-      email: part.email || 'info@company.com',
-      phone: part.phone || '+1 (555) 000-0000',
-      status: part.status || 'New',
-      source: part.source || 'Inbound',
-      assignedTo: part.assignedTo || currentUser.name,
-      dealValue: part.dealValue || 10000,
-    } as any));
-
-    const updated = [...resolved, ...leads];
-    const description = `Executed Bulk CSV deployment. Successfully registered ${resolved.length} business entities.`;
-    const nextActivities = logActivity('lead_created', description);
-    persistChanges(updated, deals, tasks, nextActivities);
-  };
-
-  const addDeal = (dealInput: Omit<Deal, 'id' | 'createdAt'>) => {
-    const freshDeal: Deal = {
-      ...dealInput,
-      id: `DL-${Math.floor(200 + Math.random() * 100)}`,
-      createdAt: new Date().toISOString()
-    };
-    const updated = [freshDeal, ...deals];
-    const description = `Drafted contract offer proposal: "${freshDeal.title}" with company ${freshDeal.company}.`;
-    const nextActivities = logActivity('lead_created', description, freshDeal.title, freshDeal.value);
-    persistChanges(leads, updated, tasks, nextActivities);
-  };
-
-  const updateDealStage = (id: string, stage: DealStage) => {
-    const dealObj = deals.find(d => d.id === id);
-    if (!dealObj) return;
-
-    const updated = deals.map(d => {
-      if (d.id === id) {
-        return { ...d, stage };
-      }
-      return d;
-    });
-
-    const description = `Advanced opportunity "${dealObj.title}" to stage: ${stage}.`;
-    const nextActivities = logActivity('stage_changed', description, dealObj.title, dealObj.value);
-    persistChanges(leads, updated, tasks, nextActivities);
-  };
-
-  const updateDealStatus = (id: string, status: 'Open' | 'Won' | 'Lost') => {
-    const dealObj = deals.find(d => d.id === id);
-    if (!dealObj) return;
-
-    const updated = deals.map(d => {
-      if (d.id === id) {
-        return { ...d, status };
-      }
-      return d;
-    });
-
-    const logType = status === 'Won' ? 'deal_won' : status === 'Lost' ? 'deal_lost' : 'stage_changed';
-    const description = status === 'Won'
-      ? `Successfully secured contract closed WON!: "${dealObj.title}" valued at ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(dealObj.value)}!`
-      : `Marked proposal "${dealObj.title}" as closed LOST. Reason: Competition / unqualified.`;
-
-    const nextActivities = logActivity(logType, description, dealObj.title, dealObj.value);
-    persistChanges(leads, updated, tasks, nextActivities);
-  };
-
-  const deleteDeal = (id: string) => {
-    const dealObj = deals.find(d => d.id === id);
-    const updated = deals.filter(d => d.id !== id);
-    if (!dealObj) return;
-
-    const description = `Removed opportunity proposal folder: "${dealObj.title}".`;
-    const nextActivities = logActivity('stage_changed', description);
-    persistChanges(leads, updated, tasks, nextActivities);
-  };
-
-  const addContact = (contactInput: Omit<Contact, 'id' | 'createdAt' | 'lastActivity'>) => {
-    const freshContact = addEntity<Contact>(contactInput, 'CON');
-    const updated = [freshContact, ...contacts];
-    const description = `Added new unified business Contact: ${freshContact.name} (${freshContact.company}).`;
-    const nextActivities = logActivity('lead_created', description, freshContact.name);
-    persistChanges(leads, deals, tasks, nextActivities, updated);
-  };
-
-  const updateContact = (id: string, updatedFields: Partial<Contact>) => {
-    const updated = updateEntityRecord<Contact>(id, updatedFields, contacts);
-    const contactObj = contacts.find(c => c.id === id);
-    let nextActivities = [...activities];
-    if (updatedFields.priority && contactObj && contactObj.priority !== updatedFields.priority) {
-      const description = `Updated priority of Contact "${contactObj.name}" to ${updatedFields.priority}.`;
-      nextActivities = [
-        {
-          id: `ACT-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          type: 'stage_changed',
-          user: currentUser.name,
-          description,
-          entityName: contactObj.name
-        },
-        ...activities
-      ];
+  const updateLead = async (id: string, fields: Partial<Lead>) => {
+    try {
+      await leadsApi.update(id, fields);
+      await Promise.all([refetchLeads(), refetchActivities()]);
+    } catch (error) {
+      reportError(error, 'Could not update lead.');
     }
-    persistChanges(leads, deals, tasks, nextActivities, updated);
   };
 
-  const deleteContacts = (ids: string[]) => {
-    const updated = contacts.filter(c => !ids.includes(c.id));
-    const description = `Archived ${ids.length} corporate relationship Contacts.`;
-    const nextActivities = logActivity('lead_created', description);
-    persistChanges(leads, deals, tasks, nextActivities, updated);
+  const deleteLeads = async (ids: string[]) => {
+    try {
+      await leadsApi.bulkDelete(ids);
+      await Promise.all([refetchLeads(), refetchActivities()]);
+      showToast(`Deleted ${ids.length} lead${ids.length === 1 ? '' : 's'}.`, 'success');
+    } catch (error) {
+      reportError(error, 'Could not delete lead(s).');
+    }
   };
 
-  const importContacts = (newImportedContacts: Partial<Contact>[]) => {
-    const resolved = importEntitiesList<Contact>(newImportedContacts, 'CON', part => ({
-      name: part.name || 'Imported Contact',
-      firstName: part.firstName || part.name?.split(' ')[0] || 'Imported',
-      lastName: part.lastName || part.name?.split(' ').slice(1).join(' ') || 'Contact',
-      company: part.company || 'Enterprise Corp',
-      email: part.email || 'info@company.com',
-      phone: part.phone || '+1 (555) 000-0000',
-      source: part.source || 'Inbound',
-      assignedTo: part.assignedTo || currentUser.name,
-      dealValue: part.dealValue || 10000,
-    } as any));
-
-    const updated = [...resolved, ...contacts];
-    const description = `Executed Bulk CSV deployment. Successfully registered ${resolved.length} business partners.`;
-    const nextActivities = logActivity('lead_created', description);
-    persistChanges(leads, deals, tasks, nextActivities, updated);
+  const importLeads = async (rows: Record<string, unknown>[]) => {
+    try {
+      const result = await leadsApi.import(rows);
+      await Promise.all([refetchLeads(), refetchActivities()]);
+      if (result.errors.length > 0) {
+        showToast(`Imported ${result.importedCount} lead(s). ${result.errors.length} row(s) failed validation.`, 'info');
+      } else {
+        showToast(`Imported ${result.importedCount} lead(s).`, 'success');
+      }
+      return { importedCount: result.importedCount, errors: result.errors };
+    } catch (error) {
+      reportError(error, 'Import failed.');
+      return { importedCount: 0, errors: [] };
+    }
   };
 
-  const addTask = (taskInput: Omit<CRMTask, 'id'>) => {
-    const freshTask: CRMTask = {
-      ...taskInput,
-      id: `TSK-${Math.floor(300 + Math.random() * 100)}`
-    };
-    const updated = [freshTask, ...tasks];
-    persistChanges(leads, deals, updated, activities);
+  // ---------------------------------------------------------------------
+  // Deals
+  // ---------------------------------------------------------------------
+  const addDeal = async (dealInput: Omit<Deal, 'id' | 'createdAt'>) => {
+    try {
+      await dealsApi.create(dealInput);
+      await Promise.all([refetchDeals(), refetchActivities()]);
+      showToast(`Deal "${dealInput.title}" created.`, 'success');
+    } catch (error) {
+      reportError(error, 'Could not create deal.');
+    }
   };
 
-  const toggleTask = (id: string) => {
-    const taskObj = tasks.find(t => t.id === id);
+  const updateDeal = async (id: string, fields: Partial<Deal>) => {
+    try {
+      await dealsApi.update(id, fields);
+      await Promise.all([refetchDeals(), refetchActivities()]);
+    } catch (error) {
+      reportError(error, 'Could not update deal.');
+    }
+  };
+
+  const updateDealStage = async (id: string, stage: DealStage) => {
+    await updateDeal(id, { stage });
+  };
+
+  const updateDealStatus = async (id: string, status: 'Open' | 'Won' | 'Lost') => {
+    await updateDeal(id, { status });
+  };
+
+  const deleteDeal = async (id: string) => {
+    try {
+      await dealsApi.remove(id);
+      await Promise.all([refetchDeals(), refetchActivities()]);
+      showToast('Deal removed.', 'success');
+    } catch (error) {
+      reportError(error, 'Could not delete deal.');
+    }
+  };
+
+  // ---------------------------------------------------------------------
+  // Contacts
+  // ---------------------------------------------------------------------
+  const addContact = async (contactInput: Omit<Contact, 'id' | 'createdAt' | 'lastActivity'>) => {
+    try {
+      await contactsApi.create(contactInput);
+      await Promise.all([refetchContacts(), refetchActivities()]);
+      showToast(`Contact "${contactInput.name}" added.`, 'success');
+    } catch (error) {
+      reportError(error, 'Could not create contact.');
+    }
+  };
+
+  const updateContact = async (id: string, fields: Partial<Contact>) => {
+    try {
+      await contactsApi.update(id, fields);
+      await Promise.all([refetchContacts(), refetchActivities()]);
+    } catch (error) {
+      reportError(error, 'Could not update contact.');
+    }
+  };
+
+  const deleteContacts = async (ids: string[]) => {
+    try {
+      await contactsApi.bulkDelete(ids);
+      await Promise.all([refetchContacts(), refetchActivities()]);
+      showToast(`Deleted ${ids.length} contact${ids.length === 1 ? '' : 's'}.`, 'success');
+    } catch (error) {
+      reportError(error, 'Could not delete contact(s).');
+    }
+  };
+
+  const importContacts = async (rows: Record<string, unknown>[]) => {
+    try {
+      const result = await contactsApi.import(rows);
+      await Promise.all([refetchContacts(), refetchActivities()]);
+      if (result.errors.length > 0) {
+        showToast(`Imported ${result.importedCount} contact(s). ${result.errors.length} row(s) failed validation.`, 'info');
+      } else {
+        showToast(`Imported ${result.importedCount} contact(s).`, 'success');
+      }
+      return { importedCount: result.importedCount, errors: result.errors };
+    } catch (error) {
+      reportError(error, 'Import failed.');
+      return { importedCount: 0, errors: [] };
+    }
+  };
+
+  // ---------------------------------------------------------------------
+  // Tasks
+  // ---------------------------------------------------------------------
+  const addTask = async (taskInput: Omit<CRMTask, 'id'>) => {
+    try {
+      await tasksApi.create(taskInput);
+      await refetchTasks();
+    } catch (error) {
+      reportError(error, 'Could not create task.');
+    }
+  };
+
+  const toggleTask = async (id: string) => {
+    const taskObj = tasks.find((t) => t.id === id);
     if (!taskObj) return;
-
-    const nextStatus: TaskStatus = taskObj.status === 'Pending' ? 'Completed' : 'Pending';
-    const updated = tasks.map(t => {
-      if (t.id === id) {
-        return { ...t, status: nextStatus };
-      }
-      return t;
-    });
-
-    let nextActivities = [...activities];
-    if (nextStatus === 'Completed') {
-      const description = `Completed follow-up checklist: "${taskObj.title}".`;
-      nextActivities = [
-        {
-          id: `ACT-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          type: 'task_completed',
-          user: currentUser.name,
-          description,
-          entityName: taskObj.title
-        },
-        ...activities
-      ];
+    try {
+      await tasksApi.update(id, { status: taskObj.status === 'Pending' ? 'Completed' : 'Pending' });
+      await Promise.all([refetchTasks(), refetchActivities()]);
+    } catch (error) {
+      reportError(error, 'Could not update task.');
     }
-    persistChanges(leads, deals, updated, nextActivities);
   };
 
-  const deleteTask = (id: string) => {
-    const updated = tasks.filter(t => t.id !== id);
-    persistChanges(leads, deals, updated, activities);
+  const deleteTask = async (id: string) => {
+    try {
+      await tasksApi.remove(id);
+      await refetchTasks();
+    } catch (error) {
+      reportError(error, 'Could not delete task.');
+    }
   };
 
-  const resetData = () => {
-    localStorage.clear();
-    setLeads(INITIAL_LEADS);
-    setDeals(INITIAL_DEALS);
-    setTasks(INITIAL_TASKS);
-    setActivities(INITIAL_ACTIVITIES);
-    setContacts(INITIAL_CONTACTS);
-    saveCRMData(INITIAL_LEADS, INITIAL_DEALS, INITIAL_TASKS, INITIAL_ACTIVITIES, INITIAL_CONTACTS);
+  const importDeals = async (rows: Record<string, unknown>[]) => {
+    try {
+      const result = await dealsApi.import(rows);
+      await Promise.all([refetchDeals(), refetchActivities()]);
+      if (result.errors.length > 0) {
+        showToast(`Imported ${result.importedCount} deal(s). ${result.errors.length} row(s) failed validation.`, 'info');
+      } else {
+        showToast(`Imported ${result.importedCount} deal(s).`, 'success');
+      }
+      return { importedCount: result.importedCount, errors: result.errors };
+    } catch (error) {
+      reportError(error, 'Import failed.');
+      return { importedCount: 0, errors: [] };
+    }
   };
 
-  const updateCurrentUser = (name: string, role: string) => {
-    setCurrentUser({ name, role });
+  const importTasks = async (rows: Record<string, unknown>[]) => {
+    try {
+      const result = await tasksApi.import(rows);
+      await refetchTasks();
+      if (result.errors.length > 0) {
+        showToast(`Imported ${result.importedCount} task(s). ${result.errors.length} row(s) failed validation.`, 'info');
+      } else {
+        showToast(`Imported ${result.importedCount} task(s).`, 'success');
+      }
+      return { importedCount: result.importedCount, errors: result.errors };
+    } catch (error) {
+      reportError(error, 'Import failed.');
+      return { importedCount: 0, errors: [] };
+    }
+  };
+
+  // ---------------------------------------------------------------------
+  // Accounts
+  // ---------------------------------------------------------------------
+  const addAccount = async (accountInput: Omit<Account, 'id' | 'createdAt'>) => {
+    try {
+      await accountsApi.create(accountInput);
+      await refetchAccounts();
+      showToast(`Account "${accountInput.name}" created.`, 'success');
+    } catch (error) {
+      reportError(error, 'Could not create account.');
+    }
+  };
+
+  const updateAccount = async (id: string, fields: Partial<Account>) => {
+    try {
+      await accountsApi.update(id, fields);
+      await refetchAccounts();
+    } catch (error) {
+      reportError(error, 'Could not update account.');
+    }
+  };
+
+  const deleteAccount = async (id: string) => {
+    try {
+      await accountsApi.remove(id);
+      await refetchAccounts();
+      showToast('Account removed.', 'success');
+    } catch (error) {
+      reportError(error, 'Could not delete account.');
+    }
+  };
+
+  const resetData = async () => {
+    try {
+      await Promise.all([refetchLeads(), refetchContacts(), refetchDeals(), refetchTasks(), refetchActivities(), refetchAccounts()]);
+      showToast('Workspace data refreshed from the server.', 'success');
+    } catch (error) {
+      reportError(error, 'Could not refresh workspace data.');
+    }
+  };
+
+  const updateCurrentUser = async (name: string, role: string) => {
+    try {
+      await updateProfile({ name, role });
+    } catch (error) {
+      reportError(error, 'Could not update profile.');
+    }
   };
 
   return (
@@ -377,7 +380,9 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
         contacts,
         tasks,
         activities,
+        accounts,
         currentUser,
+        loading,
         collapsedSidebar,
         workspace,
         globalSearch,
@@ -389,6 +394,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
         deleteLeads,
         importLeads,
         addDeal,
+        updateDeal,
         updateDealStage,
         updateDealStatus,
         deleteDeal,
@@ -399,8 +405,13 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
         addTask,
         toggleTask,
         deleteTask,
+        importDeals,
+        importTasks,
+        addAccount,
+        updateAccount,
+        deleteAccount,
         resetData,
-        updateCurrentUser
+        updateCurrentUser,
       }}
     >
       {children}

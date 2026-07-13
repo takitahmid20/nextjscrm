@@ -7,8 +7,9 @@
 
 import React, { useState } from 'react';
 import { ArrowLeft, Mail, User, Sparkles, TrendingUp, MoreVertical, Briefcase } from 'lucide-react';
-import { Lead, CRMTask, Deal } from '../types';
+import { Lead, CRMTask, Deal, LeadStatus } from '../types';
 import { useCRM } from '../context/CRMContext';
+import { useToast } from '../context/ToastContext';
 import { Button } from '@/components/ui/button';
 import { FormSelect } from './forms/FormControls';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -18,9 +19,10 @@ import CRMProgressBanner from './details/CRMProgressBanner';
 import CRMDemographicsCard from './details/CRMDemographicsCard';
 import CRMAddressCard from './details/CRMAddressCard';
 import CRMInteractionTabs from './details/CRMInteractionTabs';
+import AttachmentsPanel from './AttachmentsPanel';
 import CRMEditEntitySheet from './sheets/CRMEditEntitySheet';
 import CRMOutboundEmailSheet from './sheets/CRMOutboundEmailSheet';
-import CRMConvertLeadSheet from './sheets/CRMConvertLeadSheet';
+import CRMConvertLeadSheet, { ConvertLeadDealPayload } from './sheets/CRMConvertLeadSheet';
 
 interface LeadDetailsViewProps {
   leadId: string;
@@ -45,7 +47,8 @@ export default function LeadDetailsView({
   onAddDeal,
   onBack
 }: LeadDetailsViewProps) {
-  const { addContact } = useCRM();
+  const { addContact, loading, currentUser } = useCRM();
+  const { showToast } = useToast();
 
   // Find the current lead
   const lead = leads.find(l => l.id === leadId);
@@ -60,7 +63,7 @@ export default function LeadDetailsView({
   const [emailBody, setEmailBody] = useState('');
 
   // Load timeline notes history from lead record
-  const rawHistory: Array<{ id: string; content: string; date: string; author: string }> = (lead as any)?.notes_history || [];
+  const rawHistory: Array<{ id: string; content: string; date: string; author: string }> = lead?.notes_history || [];
   const notesHistory = React.useMemo(() => {
     if (!lead) return [];
     if (rawHistory.length === 0 && lead.notes) {
@@ -80,14 +83,24 @@ export default function LeadDetailsView({
     return tasks.filter(t => t.relatedToType === 'Lead' && t.relatedToName === lead.name);
   }, [tasks, lead]);
 
-  // Fallback if lead not found
+  // Data is still loading (e.g. right after a full-page navigation to this
+  // route) — show a loading state instead of a false "not found."
+  if (!lead && loading) {
+    return (
+      <div id="lead-loading" className="text-center py-16 bg-card border border-border rounded-lg shadow-sm">
+        <p className="text-sm text-muted-foreground">Loading lead record…</p>
+      </div>
+    );
+  }
+
+  // Fallback if lead genuinely not found
   if (!lead) {
     return (
-      <div id="lead-not-found" className="text-center py-16 bg-white border border-[#E5E7EB] rounded-lg shadow-sm">
-        <Briefcase className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-        <h2 className="text-lg font-semibold text-gray-900">Lead Record Not Found</h2>
-        <p className="text-sm text-gray-500 mb-4">The customer profile you are attempting to review may have been purged or relocated.</p>
-        <Button onClick={onBack} className="bg-[#2563EB] hover:bg-[#1D4ED8] text-white">
+      <div id="lead-not-found" className="text-center py-16 bg-card border border-border rounded-lg shadow-sm">
+        <Briefcase className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+        <h2 className="text-lg font-semibold text-foreground">Lead Record Not Found</h2>
+        <p className="text-sm text-muted-foreground mb-4">The customer profile you are attempting to review may have been purged or relocated.</p>
+        <Button onClick={onBack} className="bg-primary hover:bg-primary/90 text-primary-foreground">
           <ArrowLeft className="h-4 w-4 mr-1.5" />
           Back to Directory
         </Button>
@@ -96,10 +109,10 @@ export default function LeadDetailsView({
   }
 
   // Callback to persist profile mutations
-  const handleProfileSave = (updatedFields: any) => {
+  const handleProfileSave = (updatedFields: Partial<Lead>) => {
     onUpdateLead(lead.id, updatedFields);
     setShowEditSheet(false);
-    alert('Lead details updated successfully.');
+    showToast('Lead details updated.', 'success');
   };
 
   // Timeline note CRUD callbacks
@@ -108,43 +121,43 @@ export default function LeadDetailsView({
       id: `NOTE-${Date.now()}`,
       content,
       date: new Date().toISOString(),
-      author: 'Sarah Jenkins' // Default user
+      author: currentUser.name
     };
     onUpdateLead(lead.id, {
       notes: content,
-      notes_history: [entry, ...notesHistory] as any
+      notes_history: [entry, ...notesHistory]
     });
-    alert('Timeline note added successfully.');
+    showToast('Note added.', 'success');
   };
 
   const handleSaveEditedNote = (id: string, content: string) => {
-    const updated = notesHistory.map(note => 
+    const updated = notesHistory.map(note =>
       note.id === id ? { ...note, content, date: new Date().toISOString() } : note
     );
     onUpdateLead(lead.id, {
-      notes_history: updated as any,
+      notes_history: updated,
       notes: updated[0]?.content || ''
     });
-    alert('Timeline note entry modified.');
+    showToast('Note updated.', 'success');
   };
 
   const handleDeleteNote = (id: string) => {
     const filtered = notesHistory.filter(n => n.id !== id);
     onUpdateLead(lead.id, {
-      notes_history: filtered as any,
+      notes_history: filtered,
       notes: filtered[0]?.content || ''
     });
-    alert('Timeline note entry removed.');
+    showToast('Note removed.', 'success');
   };
 
   const handleSendEmail = (subject: string, body: string) => {
     onUpdateLead(lead.id, {
       lastActivity: `Sent email regarding: "${subject}"`
     });
-    alert(`Outbound message sent to <${lead.email}>.`);
+    showToast(`Email sent to ${lead.email}.`, 'success');
   };
 
-  const handleConvertLead = (dealPayload: any | null) => {
+  const handleConvertLead = (dealPayload: ConvertLeadDealPayload | null) => {
     // 1. Add contact to contacts directory
     addContact({
       name: lead.name,
@@ -156,9 +169,9 @@ export default function LeadDetailsView({
       source: lead.source,
       assignedTo: lead.assignedTo,
       notes: lead.notes || 'Converted from Lead.',
-      companyWebsite: (lead as any).companyWebsite || '',
-      facebook: (lead as any).facebook || '',
-      emailOptOut: (lead as any).emailOptOut || false,
+      companyWebsite: lead.companyWebsite || '',
+      facebook: lead.facebook || '',
+      emailOptOut: lead.emailOptOut || false,
       priority: lead.priority || 'Medium',
       addressInfo: lead.addressInfo || {},
       dealValue: lead.dealValue,
@@ -167,6 +180,8 @@ export default function LeadDetailsView({
 
     // 2. Add deal opportunity (if dealPayload exists)
     if (dealPayload) {
+      const defaultCloseDate = new Date();
+      defaultCloseDate.setDate(defaultCloseDate.getDate() + 30);
       onAddDeal({
         title: dealPayload.title,
         company: lead.company,
@@ -176,15 +191,15 @@ export default function LeadDetailsView({
         contactPerson: lead.name,
         email: lead.email,
         phone: lead.phone,
-        expectedCloseDate: '2026-06-30',
+        expectedCloseDate: defaultCloseDate.toISOString().slice(0, 10),
         assignedTo: dealPayload.assignedTo,
       });
     }
 
     // 3. Mark lead as Qualified
     onUpdateLead(lead.id, { status: 'Qualified' });
-    
-    alert(`Successfully converted Lead "${lead.name}" into Contact & Qualified Account.`);
+
+    showToast(`Converted "${lead.name}" into a contact.`, 'success');
     onBack();
   };
 
@@ -197,19 +212,20 @@ export default function LeadDetailsView({
           <Button
             variant="outline"
             onClick={onBack}
-            className="p-2 cursor-pointer bg-white hover:bg-slate-100 text-slate-700 rounded-md border border-[#E5E7EB] transition-colors flex items-center justify-center shadow-xs h-9 w-9"
+            aria-label="Back to leads directory"
+            className="p-2 cursor-pointer bg-card hover:bg-muted text-foreground rounded-md border border-border transition-colors flex items-center justify-center shadow-xs h-9 w-9"
           >
             <ArrowLeft className="h-4.5 w-4.5" />
           </Button>
           <div>
             <div className="flex items-center space-x-2">
-              <h1 className="text-2xl font-bold text-[#111827] tracking-tight">{lead.name}</h1>
-              <span className="text-[11px] font-mono font-semibold text-[#6B7280] bg-[#E5E7EB]/55 px-1.5 py-0.5 rounded uppercase">
+              <h1 className="text-2xl font-bold text-foreground tracking-tight">{lead.name}</h1>
+              <span className="text-[11px] font-mono font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded uppercase">
                 {lead.id}
               </span>
             </div>
-            <p className="text-xs text-[#6B7280] flex items-center gap-1 mt-0.5">
-              <TrendingUp className="h-3.5 w-3.5 text-blue-500" />
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+              <TrendingUp className="h-3.5 w-3.5 text-primary" />
               Strategic Account Entity linked to {lead.company}
             </p>
           </div>
@@ -218,12 +234,12 @@ export default function LeadDetailsView({
         {/* Dynamic Action Controls for CRM Lead Status */}
         <div className="flex flex-wrap items-center gap-3 select-none">
           <div className="flex items-center space-x-2">
-            <span className="text-xs text-slate-500 font-medium">Pipeline Status:</span>
+            <span className="text-xs text-muted-foreground font-medium">Pipeline Status:</span>
             <FormSelect
               id="lead-detail-status-direct"
               value={lead.status}
               onChange={(val) => {
-                onUpdateLead(lead.id, { status: val as any });
+                onUpdateLead(lead.id, { status: val as LeadStatus });
               }}
               options={[
                 { value: 'New', label: 'New' },
@@ -237,13 +253,13 @@ export default function LeadDetailsView({
             />
           </div>
 
-          <div className="hidden sm:block h-6 w-[1.5px] bg-[#E5E7EB]" />
+          <div className="hidden sm:block h-6 w-[1.5px] bg-border" />
 
           {/* Edit lead button */}
           <Button
             type="button"
             onClick={() => setShowEditSheet(true)}
-            className="h-9 px-3.5 border border-[#D1D5DB] text-xs font-semibold text-[#374151] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer flex items-center gap-1.5"
+            className="h-9 px-3.5 border border-border text-xs font-semibold text-foreground bg-card rounded-[6px] hover:bg-muted cursor-pointer flex items-center gap-1.5"
           >
             Edit
           </Button>
@@ -252,7 +268,7 @@ export default function LeadDetailsView({
           <Button
             type="button"
             onClick={() => setShowConvertSheet(true)}
-            className="h-9 px-3.5 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer flex items-center gap-1.5"
+            className="h-9 px-3.5 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer flex items-center gap-1.5"
           >
             <Sparkles className="h-3.5 w-3.5" />
             Convert
@@ -263,22 +279,23 @@ export default function LeadDetailsView({
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
-                className="h-9 w-9 p-0 flex items-center justify-center border border-[#D1D5DB] rounded-[6px] hover:bg-slate-50 cursor-pointer"
+                aria-label="More actions"
+                className="h-9 w-9 p-0 flex items-center justify-center border border-border rounded-[6px] hover:bg-muted cursor-pointer"
               >
-                <MoreVertical className="h-4 w-4 text-[#374151]" />
+                <MoreVertical className="h-4 w-4 text-foreground" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-44 p-1 bg-white border border-[#E5E7EB] rounded-[6px] shadow-lg z-50">
+            <PopoverContent align="end" className="w-44 p-1 bg-card border border-border rounded-[6px] shadow-lg z-50">
               <button
                 type="button"
                 onClick={() => {
                   setEmailSubject(`Introductory Briefing regarding ${lead.company}`);
-                  setEmailBody(`Hi ${lead.name},\n\nI hope you're having a productive week. I wanted to touch base regarding solutions we've outlined for ${lead.company}...\n\nBest regards,\n${lead.assignedTo || 'Sarah Jenkins'}`);
+                  setEmailBody(`Hi ${lead.name},\n\nI hope you're having a productive week. I wanted to touch base regarding solutions we've outlined for ${lead.company}...\n\nBest regards,\n${lead.assignedTo || currentUser.name}`);
                   setShowEmailSheet(true);
                 }}
-                className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-[#F3F4F6] rounded flex items-center gap-2 cursor-pointer border-0"
+                className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-muted rounded flex items-center gap-2 cursor-pointer border-0"
               >
-                <Mail className="h-4 w-4 text-slate-500" />
+                <Mail className="h-4 w-4 text-muted-foreground" />
                 Send Email
               </button>
             </PopoverContent>
@@ -301,6 +318,8 @@ export default function LeadDetailsView({
           />
 
           <CRMAddressCard addressInfo={lead.addressInfo} />
+
+          <AttachmentsPanel entityType="Lead" entityId={lead.id} />
         </div>
 
         {/* RIGHT COLUMN: Timeline Notes & Followups Checklist (2/3) */}

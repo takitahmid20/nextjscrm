@@ -10,15 +10,17 @@ import { useCRM } from '../../context/CRMContext';
 import DealsView from '../../components/DealsView';
 
 export default function DealsPage() {
-  const { deals, addDeal, updateDealStage, updateDealStatus, deleteDeal } = useCRM();
+  const { deals, addDeal, updateDeal, updateDealStage, updateDealStatus, deleteDeal, importDeals } = useCRM();
 
   return (
-    <DealsView 
+    <DealsView
       deals={deals}
       onAddDeal={addDeal}
+      onUpdateDeal={updateDeal}
       onUpdateDealStage={updateDealStage}
       onUpdateDealStatus={updateDealStatus}
       onDeleteDeal={deleteDeal}
+      onImportDeals={importDeals}
     />
   );
 }

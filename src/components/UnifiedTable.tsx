@@ -23,6 +23,7 @@ interface UnifiedTableProps<T> {
   renderRow: (item: T, index: number) => React.ReactNode;
   emptyStateText?: string;
   hideScrollbar?: boolean;
+  loading?: boolean;
   pagination?: {
     currentPage: number;
     totalPages: number;
@@ -35,6 +36,8 @@ interface UnifiedTableProps<T> {
   };
 }
 
+const SKELETON_ROW_COUNT = 5;
+
 export function UnifiedTable<T>({
   id,
   className,
@@ -43,19 +46,24 @@ export function UnifiedTable<T>({
   renderRow,
   emptyStateText = 'No records matched this query.',
   hideScrollbar = false,
+  loading = false,
   pagination,
 }: UnifiedTableProps<T>) {
+  const hasPages = !!pagination && pagination.totalPages > 0;
+  const displayTotalPages = pagination ? Math.max(pagination.totalPages, 1) : 1;
+  const displayCurrentPage = pagination ? (hasPages ? pagination.currentPage : 1) : 1;
+
   return (
     <div className="space-y-4">
-      <div className={cn("bg-white border border-[#E5E7EB] rounded-[8px] overflow-hidden", className)}>
+      <div className={cn("bg-card border border-border rounded-[8px] overflow-hidden", className)}>
         <div className={cn("overflow-x-auto crm-scrollbar", hideScrollbar && "scrollbar-none")}>
           <Table id={id} className="w-full text-left text-xs border-collapse min-w-full">
-            <TableHeader className="bg-[#F5F6F8] font-medium text-[#6B7280] uppercase tracking-wider text-[11px] border-b border-[#E5E7EB]">
+            <TableHeader className="bg-muted font-medium text-muted-foreground uppercase tracking-wider text-[11px] border-b border-border">
               <TableRow>
                 {headers.map((header) => (
                   <TableHead
                     key={header.key}
-                    className={cn("py-3 px-4 text-xs font-semibold text-[#6B7280]", header.className, header.onClick && "cursor-pointer select-none hover:bg-slate-100 transition-colors")}
+                    className={cn("py-3 px-4 text-xs font-semibold text-muted-foreground", header.className, header.onClick && "cursor-pointer select-none hover:bg-accent transition-colors")}
                     onClick={header.onClick}
                   >
                     {header.label}
@@ -63,12 +71,22 @@ export function UnifiedTable<T>({
                 ))}
               </TableRow>
             </TableHeader>
-            <TableBody className="text-xs divide-y divide-[#E5E7EB] bg-white text-[#374151]">
-              {data.length === 0 ? (
+            <TableBody className="text-xs divide-y divide-border bg-card text-foreground">
+              {loading ? (
+                Array.from({ length: SKELETON_ROW_COUNT }).map((_, rowIndex) => (
+                  <TableRow key={`skeleton-row-${rowIndex}`}>
+                    {headers.map((header) => (
+                      <TableCell key={header.key} className="py-3 px-4">
+                        <div className="h-3.5 w-full max-w-[160px] rounded bg-muted animate-pulse" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : data.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={headers.length}
-                    className="py-12 text-center text-slate-400 font-sans italic"
+                    className="py-12 text-center text-muted-foreground font-sans italic"
                   >
                     {emptyStateText}
                   </TableCell>
@@ -83,7 +101,7 @@ export function UnifiedTable<T>({
 
       {/* Pagination component rendered globally if configured */}
       {pagination && (
-        <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 px-1 py-1 gap-3 select-none">
+        <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-muted-foreground px-1 py-1 gap-3 select-none">
           <div>
             Showing{' '}
             <strong>
@@ -103,15 +121,16 @@ export function UnifiedTable<T>({
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 text-slate-500 text-xs">
+            <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
               <span>Rows per page:</span>
               <select
+                aria-label="Rows per page"
                 value={pagination.rowsPerPage}
                 onChange={(e) => {
                   pagination.onRowsPerPageChange(Number(e.target.value));
                   pagination.onPageChange(1);
                 }}
-                className="border border-[#CBD5E1] rounded-[4px] px-1.5 py-1 font-semibold text-slate-700 bg-white outline-none"
+                className="border border-border rounded-[4px] px-1.5 py-1 font-semibold text-foreground bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {(pagination.rowsPerPageOptions || [5, 10, 20, 25, 50]).map((opt) => (
                   <option key={opt} value={opt}>
@@ -124,36 +143,40 @@ export function UnifiedTable<T>({
             <div className="flex items-center gap-1">
               <Button
                 variant="outline"
-                disabled={pagination.currentPage === 1}
+                aria-label="First page"
+                disabled={!hasPages || pagination.currentPage === 1}
                 onClick={() => pagination.onPageChange(1)}
-                className="h-8 px-2.5 border-[#CBD5E1] text-xs font-semibold rounded-[4px] hover:bg-slate-50 text-slate-700 bg-white cursor-pointer disabled:opacity-40"
+                className="h-8 px-2.5 border-border text-xs font-semibold rounded-[4px] hover:bg-muted text-foreground bg-background cursor-pointer disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
               >
                 First
               </Button>
               <Button
                 variant="outline"
-                disabled={pagination.currentPage === 1}
+                aria-label="Previous page"
+                disabled={!hasPages || pagination.currentPage === 1}
                 onClick={() => pagination.onPageChange(Math.max(pagination.currentPage - 1, 1))}
-                className="h-8 px-2.5 border-[#CBD5E1] text-xs font-semibold rounded-[4px] hover:bg-slate-50 text-slate-700 bg-white cursor-pointer disabled:opacity-40"
+                className="h-8 px-2.5 border-border text-xs font-semibold rounded-[4px] hover:bg-muted text-foreground bg-background cursor-pointer disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
               >
                 Prev
               </Button>
-              <span className="font-semibold px-2.5 text-slate-700">
-                {pagination.currentPage} / {pagination.totalPages}
+              <span className="font-semibold px-2.5 text-foreground">
+                {displayCurrentPage} / {displayTotalPages}
               </span>
               <Button
                 variant="outline"
-                disabled={pagination.currentPage === pagination.totalPages}
+                aria-label="Next page"
+                disabled={!hasPages || pagination.currentPage === pagination.totalPages}
                 onClick={() => pagination.onPageChange(Math.min(pagination.currentPage + 1, pagination.totalPages))}
-                className="h-8 px-2.5 border-[#CBD5E1] text-xs font-semibold rounded-[4px] hover:bg-slate-50 text-slate-700 bg-white cursor-pointer disabled:opacity-40"
+                className="h-8 px-2.5 border-border text-xs font-semibold rounded-[4px] hover:bg-muted text-foreground bg-background cursor-pointer disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
               >
                 Next
               </Button>
               <Button
                 variant="outline"
-                disabled={pagination.currentPage === pagination.totalPages}
+                aria-label="Last page"
+                disabled={!hasPages || pagination.currentPage === pagination.totalPages}
                 onClick={() => pagination.onPageChange(pagination.totalPages)}
-                className="h-8 px-2.5 border-[#CBD5E1] text-xs font-semibold rounded-[4px] hover:bg-slate-50 text-slate-700 bg-white cursor-pointer disabled:opacity-40"
+                className="h-8 px-2.5 border-border text-xs font-semibold rounded-[4px] hover:bg-muted text-foreground bg-background cursor-pointer disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
               >
                 Last
               </Button>

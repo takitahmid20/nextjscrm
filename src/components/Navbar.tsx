@@ -7,144 +7,156 @@
 
 import React, { useState, useEffect } from 'react';
 import { useCRM } from '../context/CRMContext';
-import { 
-  Search, 
-  Bell, 
-  ChevronDown, 
+import { useToast } from '../context/ToastContext';
+import { useTheme } from '../context/ThemeContext';
+import { formatRelativeTime } from '../utils';
+import { toggleMobileSidebar } from './Sidebar';
+import {
+  Search,
+  Bell,
   HelpCircle,
-  Database
+  Menu,
+  Sun,
+  Moon,
 } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+
+const SUPPORT_EMAIL = 'support@centriccrm.example.com';
+const RECENT_ACTIVITY_LIMIT = 5;
 
 export default function Navbar() {
-  const { 
-    globalSearch, 
-    setGlobalSearch, 
-    workspace, 
-    setWorkspace, 
-    activities 
-  } = useCRM();
+  const { globalSearch, setGlobalSearch, activities } = useCRM();
+  const { showToast } = useToast();
+  const { theme, toggleTheme } = useTheme();
 
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [timeStr, setTimeStr] = useState('2026-05-28 20:25:55 UTC');
+  // Real ticking clock. Starts as `null` and is only populated on the client
+  // after mount so the server-rendered markup never disagrees with the
+  // client's first paint (avoids a hydration mismatch on the current time).
+  const [now, setNow] = useState<Date | null>(null);
 
-  // Realistic dynamic clock showing UTC timezone matching metadata
   useEffect(() => {
-    let now = new Date('2026-05-28T20:25:55Z');
-    const timer = setInterval(() => {
-      now = new Date(now.getTime() + 1000);
-      const yyyy = now.getUTCFullYear();
-      const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
-      const dd = String(now.getUTCDate()).padStart(2, '0');
-      const hh = String(now.getUTCHours()).padStart(2, '0');
-      const min = String(now.getUTCMinutes()).padStart(2, '0');
-      const ss = String(now.getUTCSeconds()).padStart(2, '0');
-      setTimeStr(`${yyyy}-${mm}-${dd} ${hh}:${min}:${ss} UTC`);
-    }, 1000);
+    setNow(new Date());
+    const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const systemAlerts = [
-    { id: 1, text: 'Lead "Emily Watson" was assigned to you by Sarah Jenkins.', time: '12 mins ago' },
-    { id: 2, text: 'Opportunity "Enterprise ERP Integration" value upgraded to $24.5k.', time: '2h ago' },
-    { id: 3, text: 'Weekly quarterly sales export prepared successfully.', time: '5h ago' }
-  ];
+  const recentActivity = activities.slice(0, RECENT_ACTIVITY_LIMIT);
+
+  function handleHelpClick() {
+    showToast(`Need help? Reach out to ${SUPPORT_EMAIL}.`, 'info');
+  }
 
   return (
-    <header 
-      id="crm-main-navbar" 
-      className="sticky top-0 z-20 h-[72px] bg-white border-b border-[#E5E7EB] px-6 flex items-center justify-between"
+    <header
+      id="crm-main-navbar"
+      className="sticky top-0 z-20 h-[72px] bg-card border-b border-border px-4 md:px-6 flex items-center justify-between"
     >
+      {/* Mobile hamburger — opens the Sidebar drawer, hidden at md+ */}
+      <button
+        type="button"
+        onClick={toggleMobileSidebar}
+        aria-label="Open sidebar menu"
+        title="Open sidebar menu"
+        className="h-10 w-10 flex items-center justify-center border border-border hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-[6px] transition-colors mr-3 md:hidden flex-shrink-0"
+      >
+        <Menu className="h-4.5 w-4.5" />
+      </button>
+
       {/* Left: Global Search Input */}
       <div className="flex items-center flex-1 max-w-md">
         <div className="relative w-full">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#6B7280]">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-muted-foreground">
             <Search className="h-4.5 w-4.5" />
           </div>
           <input
             id="global-crm-search-input"
             type="text"
+            aria-label="Search leads, companies, deals or tasks"
             placeholder="Search leads, companies, deals or tasks..."
             value={globalSearch}
             onChange={(e) => setGlobalSearch(e.target.value)}
-            className="w-full h-10 pl-10 pr-4 bg-white border border-[#E5E7EB] text-[#111827] placeholder-[#6B7280] text-[13px] rounded-[6px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]/20 transition-all font-sans"
+            className="w-full h-10 pl-10 pr-4 bg-background border border-border text-foreground placeholder-muted-foreground text-[13px] rounded-[6px] outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all font-sans"
           />
         </div>
       </div>
 
-      {/* Right: Clock, Workspace switcher, Alerts, Profile info */}
-      <div className="flex items-center space-x-4 ml-4">
-        {/* Real-time UTC ticking clock display */}
-        <div className="font-mono text-[11px] text-[#6B7280] bg-[#F5F6F8] border border-[#E5E7EB] px-2.5 py-1 rounded-[4px] select-none md:flex hidden items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse"></span>
-          {timeStr}
-        </div>
-
-        {/* Corporate Workspace Switcher Select Dropdown */}
-        <div className="relative md:block hidden">
-          <div className="flex items-center space-x-1.5 px-3 py-1.5 border border-[#E5E7EB] hover:border-[#2563EB]/40 rounded-[6px] bg-white text-xs cursor-pointer text-[#111827] select-none">
-            <Database className="h-3.5 w-3.5 text-[#2563EB]" />
-            <select
-              id="workspace-switcher-dropdown"
-              value={workspace}
-              onChange={(e) => setWorkspace(e.target.value)}
-              className="bg-transparent border-none pr-6 outline-none font-medium text-[12px] cursor-pointer appearance-none"
-            >
-              <option value="US_EAST_PROD">US-East (Prod)</option>
-              <option value="EU_WEST_PROD">EU-West (Prod)</option>
-              <option value="APAC_STAGE">APAC (Test-Bed)</option>
-            </select>
-            <ChevronDown className="h-3 w-3 text-[#6B7280] absolute right-2.5 pointer-events-none" />
+      {/* Right: Clock, Alerts, Help */}
+      <div className="flex items-center space-x-2 md:space-x-4 ml-4">
+        {/* Real-time ticking clock display */}
+        {now && (
+          <div className="font-mono text-[11px] text-muted-foreground bg-muted border border-border px-2.5 py-1 rounded-[4px] select-none md:flex hidden items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse"></span>
+            {now.toLocaleString(undefined, {
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              hour12: false,
+            })}
           </div>
-        </div>
+        )}
 
-        {/* Dynamic Activity / Alert Bells Dropdown */}
-        <div className="relative">
-          <button
-            id="navbar-alert-bell"
-            onClick={() => setShowNotifications(!showNotifications)}
-            className="h-10 w-10 flex items-center justify-center border border-[#E5E7EB] hover:bg-[#EFF6FF] text-[#6B7280] hover:text-[#2563EB] rounded-[6px] relative transition-colors"
-          >
-            <Bell className="h-4.5 w-4.5" />
-            {activities.length > 0 && (
-              <span className="absolute top-2 right-2.5 h-2 w-2 rounded-full bg-blue-600 outline outline-2 outline-white"></span>
-            )}
-          </button>
-
-          {/* Alert Popover */}
-          {showNotifications && (
-            <div 
-              id="navbar-notifications-panel" 
-              className="absolute right-0 mt-2 w-[340px] bg-white border border-[#E5E7EB] rounded-[8px] shadow-sm z-50 text-xs text-[#111827] overflow-hidden"
+        {/* Activity notifications, backed by the real activity feed */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              id="navbar-alert-bell"
+              type="button"
+              aria-label={`Notifications${recentActivity.length > 0 ? ` (${recentActivity.length} recent)` : ''}`}
+              className="h-10 w-10 flex items-center justify-center border border-border hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-[6px] relative transition-colors"
             >
-              <div className="p-3 border-b border-[#E5E7EB] bg-[#F5F6F8] flex items-center justify-between">
-                <span className="font-semibold text-[13px]">Realtime Activity Center</span>
-                <span className="text-[10px] text-blue-600 font-semibold uppercase">{activities.length} new records</span>
-              </div>
-              <div className="max-h-[280px] overflow-y-auto crm-scrollbar">
-                {systemAlerts.map((alert) => (
-                  <div key={alert.id} className="p-3 border-b border-[#E5E7EB] hover:bg-[#EFF6FF]/60 transition-colors">
-                    <p className="leading-normal mb-1">{alert.text}</p>
-                    <span className="text-[10px] text-[#6B7280]">{alert.time}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="p-2 border-t border-[#E5E7EB] bg-[#F5F6F8] text-center">
-                <button 
-                  onClick={() => setShowNotifications(false)}
-                  className="w-full py-1 text-center font-medium text-blue-600 hover:text-blue-800 transition-colors"
-                >
-                  Close panel
-                </button>
-              </div>
+              <Bell className="h-4.5 w-4.5" />
+              {recentActivity.length > 0 && (
+                <span className="absolute top-2 right-2.5 h-2 w-2 rounded-full bg-primary outline outline-2 outline-card"></span>
+              )}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            id="navbar-notifications-panel"
+            align="end"
+            className="w-[340px] p-0 bg-card border border-border rounded-[8px] shadow-sm text-xs text-foreground overflow-hidden"
+          >
+            <div className="p-3 border-b border-border bg-muted flex items-center justify-between">
+              <span className="font-semibold text-[13px]">Recent Activity</span>
+              <span className="text-[10px] text-primary font-semibold uppercase">{recentActivity.length} shown</span>
             </div>
-          )}
-        </div>
+            <div className="max-h-[280px] overflow-y-auto crm-scrollbar">
+              {recentActivity.length === 0 ? (
+                <div className="p-4 text-center text-muted-foreground">No recent activity yet.</div>
+              ) : (
+                recentActivity.map((activity) => (
+                  <div key={activity.id} className="p-3 border-b border-border last:border-b-0 hover:bg-primary/5 transition-colors">
+                    <p className="leading-normal mb-1">
+                      <strong className="text-foreground">{activity.user}</strong>: {activity.description}
+                    </p>
+                    <span className="text-[10px] text-muted-foreground">{formatRelativeTime(activity.timestamp)}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
 
-        {/* Minimal Customer Service Helpline Button */}
-        <button 
-          onClick={() => alert("CRM Operational Knowledge Base is loaded. Contact support at +1 (800) 555-CRM-CENTRIC.")}
-          className="h-10 w-10 flex items-center justify-center border border-[#E5E7EB] hover:bg-[#EFF6FF] text-[#6B7280] hover:text-[#2563EB] rounded-[6px] transition-colors"
-          title="Operational Support Guide"
+        {/* Theme toggle */}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          className="h-10 w-10 flex items-center justify-center border border-border hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-[6px] transition-colors"
+        >
+          {theme === 'dark' ? <Sun className="h-4.5 w-4.5" /> : <Moon className="h-4.5 w-4.5" />}
+        </button>
+
+        {/* Support / help */}
+        <button
+          type="button"
+          onClick={handleHelpClick}
+          aria-label="Get help"
+          title="Get help"
+          className="h-10 w-10 flex items-center justify-center border border-border hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-[6px] transition-colors"
         >
           <HelpCircle className="h-4.5 w-4.5" />
         </button>

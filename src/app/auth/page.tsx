@@ -5,24 +5,27 @@
 
 "use client";
 
-import React from 'react';
-import { useRouter } from 'next/navigation';
-import { useCRM } from '../../context/CRMContext';
+import React, { Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import AuthView from '../../components/AuthView';
 
-export default function AuthPage() {
+function AuthPageContent() {
   const router = useRouter();
-  const { updateCurrentUser } = useCRM();
+  const searchParams = useSearchParams();
 
   return (
-    <AuthView 
-      onSuccessLogin={(name, role) => {
-        updateCurrentUser(name, role);
-        router.push('/');
-      }}
-      onExitAuthPreview={() => {
-        router.push('/');
+    <AuthView
+      onAuthenticated={() => {
+        router.push(searchParams.get('from') || '/');
       }}
     />
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={null}>
+      <AuthPageContent />
+    </Suspense>
   );
 }

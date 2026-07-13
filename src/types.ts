@@ -87,8 +87,110 @@ export interface CRMUser {
   email: string;
   role: string;
   avatarColor: string;
+  company?: string;
 }
 
 export interface Contact extends BaseEntity {
   convertedFromLeadId?: string;
+}
+
+/**
+ * API contract types shared by the route handlers (src/app/api/**) and the
+ * typed client (src/lib/api/**). A real backend replacing the mock data
+ * layer must keep this envelope so the client layer needs no changes.
+ */
+export interface ApiSuccess<T> {
+  success: true;
+  data: T;
+}
+
+export interface ApiFailure {
+  success: false;
+  error: {
+    message: string;
+    issues?: Record<string, string[]>;
+  };
+}
+
+export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
+
+export interface ListResult<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface ListQuery {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  sortField?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface SessionUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  avatarColor: string;
+  company?: string;
+}
+
+/**
+ * Account (Company) — a first-class entity, separate from the free-text
+ * `company` string carried on Lead/Contact/Deal. Real Account records
+ * (created explicitly) and "virtual" accounts (auto-derived from a company
+ * name that shows up on a lead/contact/deal but has no Account record yet)
+ * are unioned together in the Accounts list — see accountsDb.list() in
+ * src/lib/mock-db.ts.
+ */
+export interface Account {
+  id: string;
+  name: string;
+  industry?: string;
+  website?: string;
+  phone?: string;
+  description?: string;
+  billingAddress?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+  };
+  assignedTo: string;
+  createdAt: string;
+  /** True for auto-derived rows with no real Account record behind them yet. */
+  isVirtual?: boolean;
+}
+
+export interface AccountRollup {
+  account: Account;
+  leadCount: number;
+  contactCount: number;
+  dealCount: number;
+  openPipelineValue: number;
+  wonValue: number;
+}
+
+/**
+ * File attachment metadata + mock content (a data URI). There's no real
+ * object storage here — this is a frontend-only stand-in. A backend should
+ * swap `dataUrl` for a real storage URL and keep the rest of the shape.
+ */
+export type AttachmentEntityType = 'Lead' | 'Contact' | 'Deal' | 'Account';
+
+export interface Attachment {
+  id: string;
+  entityType: AttachmentEntityType;
+  entityId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  dataUrl: string;
+  uploadedAt: string;
+  uploadedBy: string;
 }

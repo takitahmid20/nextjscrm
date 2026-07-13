@@ -10,14 +10,15 @@ import { useCRM } from '../../context/CRMContext';
 import TasksView from '../../components/TasksView';
 
 export default function TasksPage() {
-  const { tasks, addTask, toggleTask, deleteTask } = useCRM();
+  const { tasks, addTask, toggleTask, deleteTask, importTasks } = useCRM();
 
   return (
-    <TasksView 
+    <TasksView
       tasks={tasks}
       onAddTask={addTask}
       onToggleTask={toggleTask}
       onDeleteTask={deleteTask}
+      onImportTasks={importTasks}
     />
   );
 }

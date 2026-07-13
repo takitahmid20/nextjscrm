@@ -5,6 +5,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { outboundEmailSchema } from '../../validation';
 
 interface CRMOutboundEmailSheetProps {
   open: boolean;
@@ -25,86 +26,83 @@ export default function CRMOutboundEmailSheet({
 }: CRMOutboundEmailSheetProps) {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (open) {
       setSubject(initialSubject);
       setBody(initialBody);
+      setErrors({});
     }
   }, [open, initialSubject, initialBody]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!body.trim()) {
-      alert('Please compose your email message.');
+    const parsed = outboundEmailSchema.safeParse({ subject, body });
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) fieldErrors[String(issue.path[0])] = issue.message;
+      setErrors(fieldErrors);
       return;
     }
-
-    onSendEmail(subject, body);
+    setErrors({});
+    onSendEmail(parsed.data.subject, parsed.data.body);
     onOpenChange(false);
   };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-2xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-45">
-        <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F5F6F8]">
-          <SheetTitle className="font-semibold text-[#111827] text-[15px]">
-            Send Outbound Business Email
+      <SheetContent side="right" className="w-full sm:max-w-2xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full z-45">
+        <SheetHeader className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted/40">
+          <SheetTitle className="font-semibold text-foreground text-[15px]">
+            Compose email
           </SheetTitle>
         </SheetHeader>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 text-xs text-[#111827] crm-scrollbar">
-          
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 text-xs text-foreground crm-scrollbar" noValidate>
+
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider">
-              Recipient Email Address
+            <label htmlFor="email-recipient" className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Recipient
             </label>
-            <Input
-              disabled
-              value={contactEmail || 'No email registered'}
-              className="h-10 text-xs border-[#CBD5E1] bg-slate-50 cursor-not-allowed font-semibold font-mono"
-            />
+            <Input id="email-recipient" disabled value={contactEmail || 'No email on file'} className="h-10 text-xs bg-muted cursor-not-allowed font-mono" />
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider">
-              Subject Line *
+            <label htmlFor="email-subject" className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Subject *
             </label>
             <Input
-              required
+              id="email-subject"
               value={subject}
               onChange={e => setSubject(e.target.value)}
               placeholder="e.g. Follow-up regarding licensing agreements"
-              className="h-10 text-xs border-[#CBD5E1]"
+              className="h-10 text-xs"
+              aria-invalid={!!errors.subject}
             />
+            {errors.subject && <p className="text-destructive">{errors.subject}</p>}
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider">
-              Message Body *
+            <label htmlFor="email-body" className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Message *
             </label>
             <Textarea
-              required
+              id="email-body"
               value={body}
               onChange={e => setBody(e.target.value)}
-              className="min-h-[220px] text-xs border-[#CBD5E1] outline-none"
+              className="min-h-[220px] text-xs outline-none"
+              aria-invalid={!!errors.body}
             />
+            {errors.body && <p className="text-destructive">{errors.body}</p>}
           </div>
 
-          <div className="pt-3 border-t border-[#E5E7EB] flex items-center justify-end space-x-2 select-none">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              className="h-9 px-4 border border-[#E5E7EB] text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 font-medium cursor-pointer"
-            >
-              Discard Draft
+          <div className="pt-3 border-t border-border flex items-center justify-end space-x-2 select-none">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Discard
             </Button>
-            <Button
-              type="submit"
-              className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] font-bold rounded-[6px] cursor-pointer"
-            >
-              Send Email
+            <Button type="submit">
+              Send email
             </Button>
           </div>
 

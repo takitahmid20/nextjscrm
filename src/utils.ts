@@ -398,7 +398,7 @@ export function formatUSD(value: number): string {
 
 export function formatRelativeTime(isoString: string): string {
   const date = new Date(isoString);
-  const now = new Date('2026-05-28T20:25:55Z'); // Keep relative consistency to simulated time
+  const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
@@ -538,4 +538,112 @@ export function parseCSVToContacts(csvText: string): Partial<Contact>[] {
       assignedTo: fields['assigned user'] || fields['assignedto'] || '',
     };
   });
+}
+
+export function exportDealsToCSV(deals: Deal[]): string {
+  const headers = ['ID', 'Deal Title', 'Company', 'Value ($)', 'Stage', 'Status', 'Contact Person', 'Email', 'Phone', 'Expected Close Date', 'Assigned User', 'Created At'];
+  return exportToCSV(deals, headers, d => [
+    d.id,
+    d.title,
+    d.company,
+    d.value,
+    d.stage,
+    d.status,
+    d.contactPerson,
+    d.email,
+    d.phone,
+    d.expectedCloseDate,
+    d.assignedTo,
+    d.createdAt
+  ]);
+}
+
+export function parseCSVToDeals(csvText: string): Partial<Deal>[] {
+  return parseCSV<Partial<Deal>>(csvText, fields => {
+    const title = fields['deal title'] || fields['title'] || '';
+    const company = fields['company'] || '';
+    if (!title && !company) return null;
+
+    return {
+      title,
+      company,
+      value: Number(fields['value ($)']) || Number(fields['value']) || 0,
+      stage: fields['stage'] as any,
+      contactPerson: fields['contact person'] || fields['contactperson'] || '',
+      email: fields['email'] || '',
+      phone: fields['phone'] || '',
+      expectedCloseDate: fields['expected close date'] || fields['expectedclosedate'] || '',
+      assignedTo: fields['assigned user'] || fields['assignedto'] || '',
+    };
+  });
+}
+
+export function exportTasksToCSV(tasks: CRMTask[]): string {
+  const headers = ['ID', 'Task Title', 'Due Date', 'Priority', 'Status', 'Category', 'Assigned User'];
+  return exportToCSV(tasks, headers, t => [
+    t.id,
+    t.title,
+    t.dueDate,
+    t.priority,
+    t.status,
+    t.category,
+    t.assignedTo
+  ]);
+}
+
+export function parseCSVToTasks(csvText: string): Partial<CRMTask>[] {
+  return parseCSV<Partial<CRMTask>>(csvText, fields => {
+    const title = fields['task title'] || fields['title'] || '';
+    if (!title) return null;
+
+    return {
+      title,
+      dueDate: fields['due date'] || fields['duedate'] || '',
+      priority: fields['priority'] as any,
+      category: fields['category'] as any,
+      assignedTo: fields['assigned user'] || fields['assignedto'] || '',
+    };
+  });
+}
+
+/**
+ * Simple deterministic lead score (0-100), a stand-in for the kind of
+ * behavioral/engagement scoring a real marketing-automation integration
+ * would feed in. Weighs pipeline status, acquisition channel, and how
+ * recently the lead came in — three signals that are honestly derivable
+ * from data this app actually has.
+ */
+const LEAD_STATUS_SCORE: Record<Lead['status'], number> = {
+  Qualified: 80,
+  Working: 60,
+  Nurturing: 50,
+  Contacted: 40,
+  New: 20,
+  Unqualified: 0,
+};
+
+const LEAD_SOURCE_SCORE: Record<Lead['source'], number> = {
+  Referral: 15,
+  Partnership: 15,
+  Website: 10,
+  Inbound: 10,
+  LinkedIn: 8,
+  'Ad Campaign': 5,
+  'Cold Call': 0,
+};
+
+export function computeLeadScore(lead: Lead): number {
+  const statusScore = LEAD_STATUS_SCORE[lead.status] ?? 0;
+  const sourceScore = LEAD_SOURCE_SCORE[lead.source] ?? 0;
+
+  const ageDays = (Date.now() - new Date(lead.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+  const recencyScore = ageDays <= 7 ? 10 : ageDays <= 30 ? 5 : 0;
+
+  return Math.max(0, Math.min(100, statusScore + sourceScore + recencyScore));
+}
+
+export function leadScoreTier(score: number): 'Hot' | 'Warm' | 'Cool' {
+  if (score >= 70) return 'Hot';
+  if (score >= 40) return 'Warm';
+  return 'Cool';
 }

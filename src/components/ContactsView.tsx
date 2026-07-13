@@ -6,11 +6,11 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
-import { 
-  Plus, 
-  Trash2, 
-  ChevronUp, 
-  ChevronDown, 
+import {
+  Plus,
+  Trash2,
+  ChevronUp,
+  ChevronDown,
   X,
   UserCog,
   Mail,
@@ -24,7 +24,8 @@ import {
   CalendarDays,
   SlidersHorizontal,
   MoreVertical,
-  MapPin
+  MapPin,
+  Loader2
 } from 'lucide-react';
 import { Contact, LeadSource } from '../types';
 import { CRM_USERS, formatUSD, formatRelativeTime, exportContactsToCSV, parseCSVToContacts } from '../utils';
@@ -39,14 +40,21 @@ import { FormInput, FormSelect, FormTextarea, FormCheckbox } from './forms/FormC
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useCRM } from '../context/CRMContext';
+import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { UnifiedTable, UnifiedTableHeader } from './UnifiedTable';
+
+interface ContactImportResult {
+  importedCount: number;
+  errors: { row: number; message: string }[];
+}
 
 interface ContactsViewProps {
   contacts: Contact[];
   onAddContact: (contact: Omit<Contact, 'id' | 'createdAt' | 'lastActivity'>) => void;
   onUpdateContact: (id: string, updated: Partial<Contact>) => void;
   onDeleteContacts: (ids: string[]) => void;
-  onImportContacts?: (newImportedContacts: Partial<Contact>[]) => void;
+  onImportContacts?: (newImportedContacts: Partial<Contact>[]) => Promise<ContactImportResult>;
   globalSearch: string;
 }
 
@@ -59,6 +67,8 @@ export default function ContactsView({
   globalSearch 
 }: ContactsViewProps) {
   const { addTask, currentUser } = useCRM();
+  const { showToast } = useToast();
+  const confirm = useConfirm();
 
   // Navigation & Page sizes
   const [currentPage, setCurrentPage] = useState(1);
@@ -68,6 +78,7 @@ export default function ContactsView({
   const [showImportModal, setShowImportModal] = useState(false);
   const [csvContent, setCsvContent] = useState('');
   const [csvError, setCsvError] = useState('');
+  const [importRowErrors, setImportRowErrors] = useState<{ row: number; message: string }[]>([]);
 
   // Row actions modals / sub-sheets
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
@@ -77,10 +88,10 @@ export default function ContactsView({
   // Row action forms values
   const [noteContent, setNoteContent] = useState('');
   const [followupTitle, setFollowupTitle] = useState('');
-  const [followupDate, setFollowupDate] = useState('2026-06-01');
+  const [followupDate, setFollowupDate] = useState(new Date().toISOString().slice(0, 10));
   const [followupPriority, setFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('Medium');
   const [meetingTitle, setMeetingTitle] = useState('');
-  const [meetingDate, setMeetingDate] = useState('2026-06-01');
+  const [meetingDate, setMeetingDate] = useState(new Date().toISOString().slice(0, 10));
   const [selectedAssignee, setSelectedAssignee] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
@@ -102,12 +113,12 @@ export default function ContactsView({
   const [showAddModal, setShowAddModal] = useState(false);
 
   // React Hook Form setups
-  const { 
-    register, 
-    handleSubmit, 
-    reset, 
+  const {
+    register,
+    handleSubmit,
+    reset,
     setValue,
-    formState: { errors } 
+    formState: { errors, isSubmitting }
   } = useForm<ContactFormValues>({
     resolver: zodResolver(contactSchema),
     defaultValues: {
@@ -117,7 +128,7 @@ export default function ContactsView({
       email: '',
       phone: '',
       source: 'Inbound',
-      assignedTo: 'Sarah Jenkins',
+      assignedTo: currentUser?.name || 'Unassigned',
       notes: '',
       companyWebsite: '',
       facebook: '',
@@ -134,7 +145,7 @@ export default function ContactsView({
   const sourceOptions: LeadSource[] = ['Website', 'Referral', 'Cold Call', 'Inbound', 'LinkedIn', 'Ad Campaign', 'Partnership'];
 
   // Handle Form submissions
-  const onSubmitContactForm = (data: ContactFormValues) => {
+  const onSubmitContactForm = async (data: ContactFormValues) => {
     const fullName = `${data.firstName} ${data.lastName}`.trim();
     const contactPayload = {
       name: fullName,
@@ -144,7 +155,7 @@ export default function ContactsView({
       email: data.email,
       phone: data.phone,
       source: data.source,
-      assignedTo: data.assignedTo || 'Sarah Jenkins',
+      assignedTo: data.assignedTo || currentUser?.name || 'Unassigned',
       notes: data.notes || '',
       companyWebsite: data.companyWebsite || '',
       facebook: data.facebook || '',
@@ -158,15 +169,19 @@ export default function ContactsView({
         country: data.addressCountry || ''
       },
       notes_history: data.notes ? [
-        { id: `NOTE-${Date.now()}`, content: data.notes, date: new Date().toISOString(), author: currentUser?.name || 'Sarah Jenkins' }
+        { id: `NOTE-${Date.now()}`, content: data.notes, date: new Date().toISOString(), author: currentUser?.name || 'Unassigned' }
       ] : []
     };
 
     if (editingContactId) {
-      onUpdateContact(editingContactId, contactPayload);
+      await onUpdateContact(editingContactId, contactPayload);
       setEditingContactId(null);
     } else {
-      onAddContact(contactPayload);
+      const duplicate = contactPayload.email && contacts.find(c => c.email.toLowerCase() === contactPayload.email.toLowerCase());
+      if (duplicate) {
+        showToast(`Heads up: "${duplicate.name}" already uses this email address.`, 'info');
+      }
+      await onAddContact(contactPayload);
     }
     setShowAddModal(false);
     reset();
@@ -197,8 +212,12 @@ export default function ContactsView({
     setShowAddModal(true);
   };
 
-  const handleBulkDelete = () => {
-    if (window.confirm(`Are you sure you want to permanently delete ${selectedContactIds.length} contact records?`)) {
+  const handleBulkDelete = async () => {
+    if (await confirm({
+      description: `Are you sure you want to permanently delete ${selectedContactIds.length} contact records?`,
+      destructive: true,
+      confirmLabel: 'Delete',
+    })) {
       onDeleteContacts(selectedContactIds);
       setSelectedContactIds([]);
     }
@@ -209,7 +228,7 @@ export default function ContactsView({
       onUpdateContact(id, { assignedTo: username });
     });
     setSelectedContactIds([]);
-    alert(`Reassigned the ${selectedContactIds.length} selected records to ${username}.`);
+    showToast(`Reassigned the ${selectedContactIds.length} selected records to ${username}.`, 'success');
   };
 
   const handleBulkPriorityChange = (priority: 'Low' | 'Medium' | 'High') => {
@@ -217,7 +236,7 @@ export default function ContactsView({
       onUpdateContact(id, { priority });
     });
     setSelectedContactIds([]);
-    alert(`Priority of selected contacts updated to "${priority}".`);
+    showToast(`Priority of selected contacts updated to "${priority}".`, 'success');
   };
 
   // Memoized lists filtering & sorting
@@ -276,13 +295,17 @@ export default function ContactsView({
 
   // Side actions submit handlers
   const handleLogNoteSubmit = () => {
-    if (!activeActionContact || !noteContent.trim()) return;
+    if (!activeActionContact) return;
+    if (!noteContent.trim()) {
+      showToast('Note content is required.', 'error');
+      return;
+    }
     const existingHistory = activeActionContact.notes_history || [];
     const entry = {
       id: `NOTE-${Date.now()}`,
       content: noteContent,
       date: new Date().toISOString(),
-      author: currentUser?.name || 'Sarah Jenkins'
+      author: currentUser?.name || 'Unassigned'
     };
     onUpdateContact(activeActionContact.id, {
       notes: noteContent,
@@ -290,50 +313,62 @@ export default function ContactsView({
     });
     setNoteContent('');
     setActiveActionType(null);
-    alert('Interaction note added to contact timeline.');
+    showToast('Interaction note added to contact timeline.', 'success');
   };
 
   const handleFollowupSubmit = () => {
-    if (!activeActionContact || !followupTitle.trim()) return;
+    if (!activeActionContact) return;
+    if (!followupTitle.trim()) {
+      showToast('Followup title is required.', 'error');
+      return;
+    }
     addTask({
       title: followupTitle,
       dueDate: followupDate,
       priority: followupPriority,
       status: 'Pending',
-      assignedTo: activeActionContact.assignedTo || 'Sarah Jenkins',
+      assignedTo: activeActionContact.assignedTo || currentUser?.name || 'Unassigned',
       category: 'Follow-up',
       relatedToType: 'None'
     });
     setFollowupTitle('');
     setActiveActionType(null);
-    alert(`Follow-up task scheduled configuration saved.`);
+    showToast(`Follow-up task scheduled configuration saved.`, 'success');
   };
 
   const handleMeetingSubmit = () => {
-    if (!activeActionContact || !meetingTitle.trim()) return;
+    if (!activeActionContact) return;
+    if (!meetingTitle.trim()) {
+      showToast('Meeting subject is required.', 'error');
+      return;
+    }
     addTask({
       title: `${meetingTitle} (Meeting)`,
       dueDate: meetingDate,
       priority: 'High',
       status: 'Pending',
-      assignedTo: activeActionContact.assignedTo || 'Sarah Jenkins',
+      assignedTo: activeActionContact.assignedTo || currentUser?.name || 'Unassigned',
       category: 'Meeting',
       relatedToType: 'None'
     });
     setMeetingTitle('');
     setActiveActionType(null);
-    alert(`Briefing scheduled successfully.`);
+    showToast(`Briefing scheduled successfully.`, 'success');
   };
 
   const handleSendEmailSubmit = () => {
-    if (!activeActionContact || !emailBody.trim()) return;
+    if (!activeActionContact) return;
+    if (!emailBody.trim()) {
+      showToast('Email body is required.', 'error');
+      return;
+    }
     onUpdateContact(activeActionContact.id, {
       lastActivity: `Sent email regarding: "${emailSubject}"`
     });
     setEmailSubject('');
     setEmailBody('');
     setActiveActionType(null);
-    alert(`Outbound message sent to <${activeActionContact.email}>.`);
+    showToast(`Outbound message sent to <${activeActionContact.email}>.`, 'success');
   };
 
   // Export CSV action
@@ -349,34 +384,36 @@ export default function ContactsView({
     document.body.removeChild(link);
   };
 
-  // Live simulation import trigger
-  const handleSimulationImport = () => {
-    const simulationContent = `Contact Name,Company,Email,Phone,Source,Priority,Deal Value ($),Assigned User\n"Diana Prince","Themyscira Exports","diana@exports.io","+1 (555) 777-8888","Partnership","High",45000,"Alex Rivera"\n"Wayne Bruce","Wayne Enterprises","bruce@waynecorp.co","+1 (555) 999-0000","Referral","High",125000,"Sarah Jenkins"\n"Clara Kent","Daily Planet Inc","clark@dailyplanet.org","+1 (555) 123-9876","Cold Call","Medium",15000,"Elena Rostova"`;
-    setCsvContent(simulationContent);
-  };
-
-  const handleImportSubmit = () => {
+  const handleImportSubmit = async () => {
     if (!csvContent.trim()) {
       setCsvError('Please paste or load CSV text content.');
+      setImportRowErrors([]);
       return;
     }
     if (!onImportContacts) {
       setCsvError('Importer callback is temporarily unavailable.');
+      setImportRowErrors([]);
       return;
     }
     try {
       const parsed = parseCSVToContacts(csvContent);
       if (parsed.length === 0) {
         setCsvError('No valid contacts parsed. Verify headings structure.');
+        setImportRowErrors([]);
         return;
       }
-      onImportContacts(parsed);
-      setShowImportModal(false);
-      setCsvContent('');
       setCsvError('');
-      alert(`Successfully imported ${parsed.length} business contacts.`);
+      const result = await onImportContacts(parsed);
+      setImportRowErrors(result.errors);
+      if (result.errors.length === 0) {
+        setShowImportModal(false);
+        setCsvContent('');
+      } else {
+        setCsvError(`${result.importedCount} row(s) imported, ${result.errors.length} row(s) failed:`);
+      }
     } catch (e: any) {
       setCsvError('Failed parsing CSV lines. Code: ' + e?.message);
+      setImportRowErrors([]);
     }
   };
 
@@ -384,19 +421,20 @@ export default function ContactsView({
   const tableHeaders: UnifiedTableHeader[] = [
     {
       key: 'select',
-      className: 'w-12 text-center sticky left-0 bg-[#F5F6F8] z-20 shadow-[1px_0_0_#CBD5E1] border-r border-[#E5E7EB]',
+      className: 'w-12 text-center sticky left-0 bg-muted z-20 shadow-[1px_0_0_var(--border)] border-r border-border',
       label: (
         <input
           type="checkbox"
+          aria-label="Select all contacts on this page"
           checked={paginatedContacts.length > 0 && selectedContactIds.length === paginatedContacts.length}
           onChange={toggleSelectAll}
-          className="h-3.5 w-3.5 text-[#2563EB] border-[#CBD5E1] focus:ring-[#2563EB] rounded cursor-pointer"
+          className="h-3.5 w-3.5 text-primary border-border focus:ring-primary rounded cursor-pointer"
         />
       ),
     },
     {
       key: 'name',
-      className: 'sticky left-12 bg-[#F5F6F8] z-20 shadow-[1px_0_0_#CBD5E1] border-r border-slate-200 min-w-[200px]',
+      className: 'sticky left-12 bg-muted z-20 shadow-[1px_0_0_var(--border)] border-r border-border min-w-[200px]',
       label: (
         <div className="flex items-center gap-1 select-none">
           Contact Name
@@ -439,7 +477,7 @@ export default function ContactsView({
         setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
       }
     },
-    { key: 'actions', className: 'text-center sticky right-0 bg-[#F5F6F8] z-20 border-l border-slate-200', label: 'Actions' }
+    { key: 'actions', className: 'text-center sticky right-0 bg-muted z-20 border-l border-border', label: 'Actions' }
   ];
 
   return (
@@ -448,8 +486,8 @@ export default function ContactsView({
       {/* Top Title Section */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-2 md:space-y-0">
         <div>
-          <h1 className="text-28px font-semibold text-[#111827] tracking-tight">Contacts Directory</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-[28px] font-semibold text-foreground tracking-tight">Contacts Directory</h1>
+          <p className="text-sm text-muted-foreground">
             Unified listing of qualified corporate business partners, accounts, and converted strategic relationship owners.
           </p>
         </div>
@@ -460,9 +498,9 @@ export default function ContactsView({
             id="btn-import-contacts-csv"
             onClick={() => setShowImportModal(true)}
             variant="outline"
-            className="h-10 px-3.5 bg-white border border-[#E5E7EB] hover:bg-[#EFF6FF] text-[#111827] hover:text-[#2563EB] text-[13px] font-medium rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="h-10 px-3.5 bg-card border border-border hover:bg-primary/10 text-foreground hover:text-primary text-[13px] font-medium rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <Upload className="h-4 w-4 text-[#6B7280]" />
+            <Upload className="h-4 w-4 text-muted-foreground" />
             Import CSV
           </Button>
           
@@ -470,9 +508,9 @@ export default function ContactsView({
             id="btn-export-contacts-csv"
             onClick={handleExportCSV}
             variant="outline"
-            className="h-10 px-3.5 bg-white border border-[#E5E7EB] hover:bg-[#EFF6FF] text-[#111827] hover:text-[#2563EB] text-[13px] font-medium rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="h-10 px-3.5 bg-card border border-border hover:bg-primary/10 text-foreground hover:text-primary text-[13px] font-medium rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <Download className="h-4 w-4 text-[#6B7280]" />
+            <Download className="h-4 w-4 text-muted-foreground" />
             Export Data
           </Button>
 
@@ -487,7 +525,7 @@ export default function ContactsView({
                 email: '',
                 phone: '',
                 source: 'Inbound',
-                assignedTo: currentUser?.name || 'Sarah Jenkins',
+                assignedTo: currentUser?.name || 'Unassigned',
                 notes: '',
                 companyWebsite: '',
                 facebook: '',
@@ -501,7 +539,7 @@ export default function ContactsView({
               });
               setShowAddModal(true);
             }}
-            className="bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-[13px] font-semibold px-4 h-10 shadow-sm rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer animate-none"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground text-[13px] font-semibold px-4 h-10 shadow-sm rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer animate-none"
           >
             <Plus className="h-4 w-4" />
             Create Contact
@@ -510,12 +548,12 @@ export default function ContactsView({
       </div>
 
       {/* Database Filters & Quick Search Card */}
-      <Card className="bg-white border border-[#E5E7EB] rounded-[8px] p-4">
+      <Card className="bg-card border border-border rounded-[8px] p-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           
           {/* Search bar inside toolbar to lock workspace search */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+            <label htmlFor="contact-toolbar-search" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
               Directory Filter Search
             </label>
             <Input
@@ -527,13 +565,13 @@ export default function ContactsView({
                 setLocalSearch(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full h-10 px-3 bg-white border border-[#E5E7EB] text-[#111827] text-xs rounded-[6px] focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]/20 outline-none"
+              className="w-full h-10 px-3 bg-card border border-border text-foreground text-xs rounded-[6px] focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
             />
           </div>
 
           {/* Filter Source Sourcing */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+            <label htmlFor="contact-source-filter" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
               Acquisition Sourcing
             </label>
             <FormSelect
@@ -553,7 +591,7 @@ export default function ContactsView({
 
           {/* Filter Assigned Representative */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+            <label htmlFor="contact-user-filter" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
               Assigned Representative
             </label>
             <FormSelect
@@ -573,7 +611,7 @@ export default function ContactsView({
 
           {/* Filter Priority */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+            <label htmlFor="contact-priority-filter" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
               Deal Priority Level
             </label>
             <div className="flex gap-2 items-center">
@@ -604,7 +642,7 @@ export default function ContactsView({
                     setPriorityFilter('All');
                     setLocalSearch('');
                   }}
-                  className="h-10 text-xs px-2.5 text-red-500 hover:text-red-650 hover:bg-red-50 font-bold shrink-0 rounded-[6px]"
+                  className="h-10 text-xs px-2.5 text-destructive hover:text-destructive hover:bg-destructive/10 font-bold shrink-0 rounded-[6px]"
                   title="Clear all filters"
                 >
                   Clear
@@ -636,68 +674,69 @@ export default function ContactsView({
           return (
             <tr 
               key={contact.id}
-              className={`group h-[52px] border-b border-[#E5E7EB] transition-colors ${
-                isChecked ? 'bg-[#EFF6FF]/50' : 'hover:bg-slate-50'
+              className={`group h-[52px] border-b border-border transition-colors ${
+                isChecked ? 'bg-primary/10' : 'hover:bg-muted/50'
               }`}
             >
               {/* Checkbox cell */}
-              <td className={`py-2.5 px-4 text-center sticky left-0 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-r border-[#E5E7EB]`}>
+              <td className={`py-2.5 px-4 text-center sticky left-0 z-10 transition-colors ${isChecked ? 'bg-primary/10' : 'bg-card group-hover:bg-muted'} border-r border-border`}>
                 <input
                   type="checkbox"
+                  aria-label={`Select ${contact.name}`}
                   checked={isChecked}
                   onChange={() => toggleSelectRow(contact.id)}
-                  className="h-3.5 w-3.5 text-[#2563EB] border-[#CBD5E1] focus:ring-[#2563EB] rounded cursor-pointer"
+                  className="h-3.5 w-3.5 text-primary border-border focus:ring-primary rounded cursor-pointer"
                 />
               </td>
 
               {/* Name & ID cell */}
-              <td className={`py-2.5 px-4 sticky left-12 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-r border-slate-200 min-w-[200px]`}>
+              <td className={`py-2.5 px-4 sticky left-12 z-10 transition-colors ${isChecked ? 'bg-primary/10' : 'bg-card group-hover:bg-muted'} border-r border-border min-w-[200px]`}>
                 <div className="flex flex-col">
                   <a 
                     href={`/contact-details/${contact.id}`}
-                    className="font-semibold text-[#2563EB] hover:text-[#1D4ED8] hover:underline text-[13px] text-left cursor-pointer truncate"
+                    className="font-semibold text-primary hover:text-primary/90 hover:underline text-[13px] text-left cursor-pointer truncate"
                   >
                     {contact.name}
                   </a>
-                  <span className="text-[10px] text-[#9CA3AF] font-mono mt-0.5 select-all">
+                  <span className="text-[10px] text-muted-foreground font-mono mt-0.5 select-all">
                     {contact.id}
                   </span>
                 </div>
               </td>
 
               {/* Company cell */}
-              <td className="py-2.5 px-4 font-semibold text-slate-700">
+              <td className="py-2.5 px-4 font-semibold text-foreground">
                 {contact.company}
               </td>
 
               {/* Email cell */}
               <td className="py-2.5 px-4">
                 {contact.email ? (
-                  <a href={`mailto:${contact.email}`} className="hover:underline text-[#2563EB] font-medium flex items-center gap-1 select-all">
-                    <Mail className="h-3 w-3 text-slate-400 shrink-0" />
+                  <a href={`mailto:${contact.email}`} className="hover:underline text-primary font-medium flex items-center gap-1 select-all">
+                    <Mail className="h-3 w-3 text-muted-foreground shrink-0" />
                     {contact.email}
                   </a>
                 ) : (
-                  <span className="text-slate-300 italic">None</span>
+                  <span className="text-muted-foreground italic">None</span>
                 )}
               </td>
 
               {/* Phone cell */}
-              <td className="py-2.5 px-4 font-semibold font-mono text-slate-650 space-x-1 whitespace-nowrap">
-                {contact.phone || <span className="text-slate-300 italic font-mono font-normal">None</span>}
+              <td className="py-2.5 px-4 font-semibold font-mono text-foreground space-x-1 whitespace-nowrap">
+                {contact.phone || <span className="text-muted-foreground italic font-mono font-normal">None</span>}
               </td>
 
               {/* Source cell */}
               <td className="py-2.5 px-4">
-                <span className="bg-[#F3F4F6] border border-[#E5E7EB] px-2 py-0.5 rounded-[4px] font-medium text-slate-600">
+                <span className="bg-muted border border-border px-2 py-0.5 rounded-[4px] font-medium text-foreground">
                   {contact.source}
                 </span>
               </td>
 
               {/* Portfolio manager cell */}
-              <td className="py-2.5 px-4 font-medium text-slate-700">
+              <td className="py-2.5 px-4 font-medium text-foreground">
                 <div className="flex items-center gap-1.5 select-none">
-                  <div className="h-5 w-5 rounded-full bg-[#2563EB]/10 text-[#2563EB] text-[9px] font-bold flex items-center justify-center">
+                  <div className="h-5 w-5 rounded-full bg-primary/10 text-primary text-[9px] font-bold flex items-center justify-center">
                     {contact.assignedTo ? contact.assignedTo.split(' ').map(n=>n[0]).join('') : 'U'}
                   </div>
                   <span className="truncate max-w-[110px]">{contact.assignedTo}</span>
@@ -707,38 +746,39 @@ export default function ContactsView({
               {/* Priority badge cell */}
               <td className="py-2.5 px-4 text-center">
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                  contact.priority === 'High' 
-                    ? 'bg-rose-50 border border-rose-100 text-rose-700' 
+                  contact.priority === 'High'
+                    ? 'bg-rose-50 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-800 text-rose-700 dark:text-rose-300'
                     : contact.priority === 'Medium'
-                    ? 'bg-amber-50 border border-amber-100 text-amber-700'
-                    : 'bg-slate-50 border border-slate-100 text-slate-600'
+                    ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-800 text-amber-700 dark:text-amber-300'
+                    : 'bg-muted border border-border text-muted-foreground'
                 }`}>
                   {contact.priority || 'Medium'}
                 </span>
               </td>
 
               {/* Created Date cell */}
-              <td className="py-2.5 px-4 font-mono text-slate-550 whitespace-nowrap">
+              <td className="py-2.5 px-4 font-mono text-muted-foreground whitespace-nowrap">
                 {formatRelativeTime(contact.createdAt)}
               </td>
 
               {/* Row Action popover cell */}
-              <td className={`py-2.5 px-4 text-center sticky right-0 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-l border-slate-200`}>
+              <td className={`py-2.5 px-4 text-center sticky right-0 z-10 transition-colors ${isChecked ? 'bg-primary/10' : 'bg-card group-hover:bg-muted'} border-l border-border`}>
                 <div className="flex items-center justify-center">
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button 
-                        variant="ghost" 
-                        className="h-8 w-8 p-0 flex items-center justify-center text-slate-500 hover:text-slate-900 rounded-full hover:bg-slate-200 cursor-pointer"
+                      <Button
+                        variant="ghost"
+                        aria-label={`Row actions for ${contact.name}`}
+                        className="h-8 w-8 p-0 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-full hover:bg-muted cursor-pointer"
                       >
                         <MoreVertical className="h-4 w-4" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent align="end" className="w-48 p-1 bg-white border border-[#E5E7EB] shadow-lg rounded-md z-45">
+                    <PopoverContent align="end" className="w-48 p-1 bg-card border border-border shadow-lg rounded-md z-45">
                       <div className="flex flex-col text-xs font-medium">
                         <a 
                           href={`/contact-details/${contact.id}`}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 border-0"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground border-0"
                         >
                           <Eye className="h-3.5 w-3.5 text-blue-500" />
                           <span>View Details</span>
@@ -751,7 +791,7 @@ export default function ContactsView({
                             setNoteContent('');
                             setActiveActionType('notes');
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer border-0"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer border-0"
                         >
                           <MessageSquare className="h-3.5 w-3.5 text-indigo-500" />
                           <span>Add Note</span>
@@ -766,7 +806,7 @@ export default function ContactsView({
                             setFollowupPriority('Medium');
                             setActiveActionType('followup');
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer border-0"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer border-0"
                         >
                           <CalendarDays className="h-3.5 w-3.5 text-amber-500" />
                           <span>Followups</span>
@@ -780,7 +820,7 @@ export default function ContactsView({
                             setMeetingDate('2026-06-05');
                             setActiveActionType('meeting');
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer border-0"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer border-0"
                         >
                           <CalendarDays className="h-3.5 w-3.5 text-green-500" />
                           <span>Set Meeting</span>
@@ -793,9 +833,9 @@ export default function ContactsView({
                             setSelectedAssignee(contact.assignedTo);
                             setActiveActionType('assignee');
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer border-0"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer border-0"
                         >
-                          <UserCog className="h-3.5 w-3.5 text-slate-500" />
+                          <UserCog className="h-3.5 w-3.5 text-muted-foreground" />
                           <span>Reassign Manager</span>
                         </button>
 
@@ -807,7 +847,7 @@ export default function ContactsView({
                             setActiveActionContact(contact);
                             setActiveActionType('email');
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer border-0"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer border-0"
                         >
                           <Mail className="h-3.5 w-3.5 text-cyan-500" />
                           <span>Send Email</span>
@@ -816,24 +856,28 @@ export default function ContactsView({
                         <button 
                           type="button"
                           onClick={() => handleEditOpen(contact)}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer border-0"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer border-0"
                         >
-                          <SlidersHorizontal className="h-3.5 w-3.5 text-slate-500" />
+                          <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
                           <span>Modify Profile</span>
                         </button>
 
-                        <div className="h-[1px] bg-slate-100 my-1" />
+                        <div className="h-[1px] bg-border my-1" />
 
-                        <button 
+                        <button
                           type="button"
-                          onClick={() => {
-                            if (window.confirm(`Permanently wipe contact portfolio for "${contact.name}"?`)) {
+                          onClick={async () => {
+                            if (await confirm({
+                              description: `Permanently wipe contact portfolio for "${contact.name}"?`,
+                              destructive: true,
+                              confirmLabel: 'Delete',
+                            })) {
                               onDeleteContacts([contact.id]);
                             }
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-rose-50 rounded flex items-center gap-2 text-rose-600 cursor-pointer border-0"
+                          className="w-full text-left px-3 py-2 hover:bg-destructive/10 rounded flex items-center gap-2 text-destructive cursor-pointer border-0"
                         >
-                          <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
                           <span>Delete Record</span>
                         </button>
                       </div>
@@ -848,9 +892,9 @@ export default function ContactsView({
 
       {/* Register new Contact slide out sheet */}
       <Sheet open={showAddModal} onOpenChange={setShowAddModal}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-55">
-          <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] bg-[#F5F6F8]">
-            <SheetTitle className="font-semibold text-[#111827] text-[15px]">
+        <SheetContent side="right" className="w-full sm:max-w-2xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full z-55">
+          <SheetHeader className="px-5 py-4 border-b border-border bg-muted">
+            <SheetTitle className="font-semibold text-foreground text-[15px]">
               {editingContactId ? 'Update Contact Profile Record' : 'Create Contact Profile Record'}
             </SheetTitle>
           </SheetHeader>
@@ -926,9 +970,9 @@ export default function ContactsView({
             </div>
 
             {/* Address Info Section */}
-            <div className="border border-[#E2E8F0] rounded-[8px] p-4 bg-[#F8FAFC]">
-              <h4 className="text-[11px] font-bold text-[#475569] uppercase tracking-wide mb-3 flex items-center select-none">
-                <MapPin className="h-4 w-4 mr-1.5 text-slate-500" />
+            <div className="border border-border rounded-[8px] p-4 bg-muted">
+              <h4 className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-3 flex items-center select-none">
+                <MapPin className="h-4 w-4 mr-1.5 text-muted-foreground" />
                 Address Information
               </h4>
               
@@ -972,7 +1016,7 @@ export default function ContactsView({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <FormSelect
                 label="Source Channel"
                 register={register('source')}
@@ -1008,7 +1052,7 @@ export default function ContactsView({
             />
 
             {/* Action Operations */}
-            <div className="pt-3 border-t border-[#E5E7EB] flex items-center justify-end space-x-2 select-none">
+            <div className="pt-3 border-t border-border flex items-center justify-end space-x-2 select-none">
               <Button
                 type="button"
                 variant="outline"
@@ -1017,14 +1061,16 @@ export default function ContactsView({
                   setEditingContactId(null);
                   setShowAddModal(false);
                 }}
-                className="h-9 px-4 border border-[#E5E7EB] text-xs text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
+                className="h-9 px-4 border border-border text-xs text-foreground bg-card rounded-[6px] hover:bg-muted cursor-pointer"
               >
                 Discard operations
               </Button>
               <Button
                 type="submit"
-                className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                disabled={isSubmitting}
+                className="h-9 px-4 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
               >
+                {isSubmitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 {editingContactId ? 'Update details' : 'Create profile'}
               </Button>
             </div>
@@ -1034,15 +1080,15 @@ export default function ContactsView({
 
       {/* Row action: Side panel action sheets */}
       <Sheet open={activeActionType !== null} onOpenChange={() => setActiveActionType(null)}>
-        <SheetContent side="right" className="w-full sm:max-w-xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-55">
-          <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] bg-[#F5F6F8]">
-            <SheetTitle className="font-semibold text-[#111827] text-[15px]">
+        <SheetContent side="right" className="w-full sm:max-w-xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full z-55">
+          <SheetHeader className="px-5 py-4 border-b border-border bg-muted">
+            <SheetTitle className="font-semibold text-foreground text-[15px]">
               {activeActionType === 'notes' && 'Log Contact Interaction'}
               {activeActionType === 'followup' && 'Schedule Call Check-in'}
               {activeActionType === 'meeting' && 'Schedule Executive Sync'}
               {activeActionType === 'email' && 'Dispatch Corporate Email'}
             </SheetTitle>
-            <p className="text-[10px] text-[#6B7280] font-mono mt-0.5">
+            <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
               Contact: {activeActionContact?.name} ({activeActionContact?.company})
             </p>
           </SheetHeader>
@@ -1051,17 +1097,18 @@ export default function ContactsView({
             {activeActionType === 'notes' && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                  <label htmlFor="contact-note-content" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                     Note Description
                   </label>
-                  <Textarea 
+                  <Textarea
+                    id="contact-note-content"
                     value={noteContent}
                     onChange={(e) => setNoteContent(e.target.value)}
                     placeholder="Summarize phone calls, email outcomes, custom items, or negotiated points..."
                     className="min-h-[140px] text-xs font-sans"
                   />
                 </div>
-                <Button onClick={handleLogNoteSubmit} className="w-full bg-[#2563EB] text-white hover:bg-[#1D4ED8] h-9 text-xs font-semibold rounded-[6px] cursor-pointer">
+                <Button onClick={handleLogNoteSubmit} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-9 text-xs font-semibold rounded-[6px] cursor-pointer">
                   Append to Relationship History
                 </Button>
               </div>
@@ -1070,26 +1117,27 @@ export default function ContactsView({
             {activeActionType === 'followup' && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                  <label htmlFor="contact-followup-title" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                     Task Checklist Title
                   </label>
-                  <Input type="text" value={followupTitle} onChange={(e)=>setFollowupTitle(e.target.value)} className="h-9 text-xs border-[#CBD5E1]" />
+                  <Input id="contact-followup-title" type="text" value={followupTitle} onChange={(e)=>setFollowupTitle(e.target.value)} className="h-9 text-xs border-border" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                    <label htmlFor="contact-followup-date" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                       Due Target Date
                     </label>
-                    <input type="date" value={followupDate} onChange={(e)=>setFollowupDate(e.target.value)} className="w-full h-9 px-3 border border-[#CBD5E1] rounded-[6px] text-xs bg-white text-slate-805 outline-none" />
+                    <input id="contact-followup-date" type="date" value={followupDate} onChange={(e)=>setFollowupDate(e.target.value)} className="w-full h-9 px-3 border border-border rounded-[6px] text-xs bg-card text-foreground outline-none" />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none font-semibold">
+                    <label htmlFor="contact-followup-priority" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none font-semibold">
                       Team Priority
                     </label>
                     <select
+                      id="contact-followup-priority"
                       value={followupPriority}
                       onChange={(e)=>setFollowupPriority(e.target.value as any)}
-                      className="w-full h-9 px-3 text-xs border border-[#CBD5E1] rounded-[6px] bg-slate-50 outline-none focus:border-[#2563EB]"
+                      className="w-full h-9 px-3 text-xs border border-border rounded-[6px] bg-muted outline-none focus:border-primary"
                     >
                       <option value="Low">Low</option>
                       <option value="Medium">Medium</option>
@@ -1097,7 +1145,7 @@ export default function ContactsView({
                     </select>
                   </div>
                 </div>
-                <Button onClick={handleFollowupSubmit} className="w-full bg-[#2563EB] hover:bg-[#1D4ED8] text-white h-9 text-xs font-semibold rounded-[6px] cursor-pointer">
+                <Button onClick={handleFollowupSubmit} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground h-9 text-xs font-semibold rounded-[6px] cursor-pointer">
                   Add to Account Action list
                 </Button>
               </div>
@@ -1106,18 +1154,18 @@ export default function ContactsView({
             {activeActionType === 'meeting' && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                  <label htmlFor="contact-meeting-title" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                     Sync Session Subject
                   </label>
-                  <Input type="text" value={meetingTitle} onChange={(e)=>setMeetingTitle(e.target.value)} className="h-9 text-xs border-[#CBD5E1]" />
+                  <Input id="contact-meeting-title" type="text" value={meetingTitle} onChange={(e)=>setMeetingTitle(e.target.value)} className="h-9 text-xs border-border" />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                  <label htmlFor="contact-meeting-date" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                     Scheduled Date
                   </label>
-                  <input type="date" value={meetingDate} onChange={(e)=>setMeetingDate(e.target.value)} className="w-full h-9 px-3 border border-[#CBD5E1] rounded-[6px] text-xs bg-white text-slate-805 outline-none" />
+                  <input id="contact-meeting-date" type="date" value={meetingDate} onChange={(e)=>setMeetingDate(e.target.value)} className="w-full h-9 px-3 border border-border rounded-[6px] text-xs bg-card text-foreground outline-none" />
                 </div>
-                <Button onClick={handleMeetingSubmit} className="w-full bg-[#2563EB] hover:bg-[#1D4ED8] text-white h-9 text-xs font-semibold rounded-[6px] cursor-pointer">
+                <Button onClick={handleMeetingSubmit} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground h-9 text-xs font-semibold rounded-[6px] cursor-pointer">
                   Confirm Briefing Schedules
                 </Button>
               </div>
@@ -1126,38 +1174,38 @@ export default function ContactsView({
             {activeActionType === 'email' && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                  <label htmlFor="contact-email-recipient" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                     Recipient Address
                   </label>
-                  <Input type="text" value={activeActionContact?.email || ''} disabled className="h-9 text-xs bg-slate-50 cursor-not-allowed border-[#CBD5E1]" />
+                  <Input id="contact-email-recipient" type="text" value={activeActionContact?.email || ''} disabled className="h-9 text-xs bg-muted cursor-not-allowed border-border" />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                  <label htmlFor="contact-email-subject" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                     Email Subject
                   </label>
-                  <Input type="text" value={emailSubject} onChange={(e)=>setEmailSubject(e.target.value)} className="h-9 text-xs border-[#CBD5E1]" />
+                  <Input id="contact-email-subject" type="text" value={emailSubject} onChange={(e)=>setEmailSubject(e.target.value)} className="h-9 text-xs border-border" />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                  <label htmlFor="contact-email-body" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                     Message Body
                   </label>
-                  <Textarea value={emailBody} onChange={(e)=>setEmailBody(e.target.value)} className="min-h-[140px] text-xs font-sans whitespace-pre-wrap outline-none" />
+                  <Textarea id="contact-email-body" value={emailBody} onChange={(e)=>setEmailBody(e.target.value)} className="min-h-[140px] text-xs font-sans whitespace-pre-wrap outline-none" />
                 </div>
-                <Button onClick={handleSendEmailSubmit} className="w-full bg-[#2563EB] hover:bg-[#1D4ED8] text-white h-9 text-xs font-semibold rounded-[6px] cursor-pointer">
+                <Button onClick={handleSendEmailSubmit} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground h-9 text-xs font-semibold rounded-[6px] cursor-pointer">
                   Send Message
                 </Button>
               </div>
             )}
           </div>
 
-          <div className="p-3 border-t border-[#E5E7EB] bg-[#F5F6F8] flex justify-end select-none">
+          <div className="p-3 border-t border-border bg-muted flex justify-end select-none">
             <Button
               type="button"
               onClick={() => {
                 setActiveActionContact(null);
                 setActiveActionType(null);
               }}
-              className="h-8 px-4 border border-[#E5E7EB] text-xs text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer animate-none"
+              className="h-8 px-4 border border-border text-xs text-foreground bg-card rounded-[6px] hover:bg-muted cursor-pointer animate-none"
             >
               Close Panel
             </Button>
@@ -1169,13 +1217,14 @@ export default function ContactsView({
       {selectedContactIds.length > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-xs text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-4.5 z-55 border border-slate-800 text-xs animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-center gap-2 pr-3 border-r border-slate-800 font-medium whitespace-nowrap select-none">
-            <span className="h-2 w-2 rounded-full bg-[#2563EB] animate-pulse"></span>
+            <span className="h-2 w-2 rounded-full bg-primary animate-pulse"></span>
             <span>Selected <strong className="text-blue-400 font-bold">{selectedContactIds.length}</strong> records</span>
           </div>
 
           <div className="flex items-center gap-2">
             <select
               value=""
+              aria-label="Reassign selected contacts to representative"
               onChange={(e) => {
                 const val = e.target.value;
                 if (val) handleBulkAssign(val);
@@ -1190,6 +1239,7 @@ export default function ContactsView({
 
             <select
               value=""
+              aria-label="Change priority of selected contacts"
               onChange={(e) => {
                 const val = e.target.value;
                 if (val) handleBulkPriorityChange(val as any);
@@ -1212,6 +1262,7 @@ export default function ContactsView({
 
             <button
               onClick={() => setSelectedContactIds([])}
+              aria-label="Clear selections"
               className="p-1 rounded-full text-slate-400 hover:bg-slate-800 hover:text-white transition"
               title="Clear Selections"
             >
@@ -1223,34 +1274,38 @@ export default function ContactsView({
 
       {/* SIDE PANEL: IMPORT CSV CONSOLE */}
       <Sheet open={showImportModal} onOpenChange={setShowImportModal}>
-        <SheetContent side="right" className="w-full sm:max-w-xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-100">
-          <SheetHeader className="p-4 border-b border-[#E5E7EB] bg-slate-50/50">
+        <SheetContent side="right" className="w-full sm:max-w-xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full z-100">
+          <SheetHeader className="p-4 border-b border-border bg-muted/50">
             <div className="flex items-center justify-between">
-              <SheetTitle className="font-semibold text-[#111827] text-[15px]">Bulk CSV Enterprise Importer</SheetTitle>
-              <Button variant="ghost" className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full cursor-pointer flex items-center justify-center border-0" onClick={() => setShowImportModal(false)}>
+              <SheetTitle className="font-semibold text-foreground text-[15px]">Bulk CSV Enterprise Importer</SheetTitle>
+              <Button variant="ghost" aria-label="Close import panel" className="h-8 w-8 p-0 hover:bg-muted rounded-full cursor-pointer flex items-center justify-center border-0" onClick={() => setShowImportModal(false)}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
           </SheetHeader>
 
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
-            <span className="text-[12px] text-slate-500 font-medium leading-relaxed block border-none select-none">
+            <span className="text-[12px] text-muted-foreground font-medium leading-relaxed block border-none select-none">
               Provide a raw CSV dataset representing customer records. Your column headers should map to:
             </span>
 
-            <div className="p-3 bg-slate-50 border border-[#E5E7EB] rounded-[6px] font-mono text-[10px] text-slate-600 leading-normal space-y-1 select-all">
+            <div className="p-3 bg-muted border border-border rounded-[6px] font-mono text-[10px] text-muted-foreground leading-normal space-y-1 select-all">
               <span className="block font-bold">Contact Name,Company,Email,Phone,Source,Priority,Deal Value ($),Assigned User</span>
-              <span className="block italic text-slate-400">"Diana Prince","Themyscira Exports","diana@exports.io","+1 (555) 777-8888","Partnership","High",45000,"Alex Rivera"</span>
-              <span className="block italic text-slate-400">"Wayne Bruce","Wayne Enterprises","bruce@waynecorp.co","+1 (555) 999-0000","Referral","High",125000,"Sarah Jenkins"</span>
+              <span className="block italic text-muted-foreground">"Jane Doe","Acme Corp","jane@acme.com","+1 (555) 010-2000","Partnership","High",45000,"Alex Rivera"</span>
+              <span className="block italic text-muted-foreground">"John Smith","Globex Inc","john@globex.com","+1 (555) 010-3000","Referral","High",125000,"Elena Rostova"</span>
             </div>
 
             <div className="space-y-1.5 flex flex-col h-[280px]">
-              <label className="text-xs font-semibold text-slate-700">Paste raw text csv lines:</label>
+              <label htmlFor="contact-csv-content" className="text-xs font-semibold text-foreground">Paste raw text csv lines:</label>
               <Textarea
+                id="contact-csv-content"
                 value={csvContent}
+                aria-invalid={!!csvError}
+                aria-describedby={csvError ? 'contact-csv-error' : undefined}
                 onChange={(e) => {
                   setCsvContent(e.target.value);
                   setCsvError('');
+                  setImportRowErrors([]);
                 }}
                 placeholder="Paste Comma-Separated Values here..."
                 className="flex-1 text-xs font-mono min-h-[160px]"
@@ -1258,21 +1313,18 @@ export default function ContactsView({
             </div>
 
             {csvError && (
-              <p className="text-[11px] text-red-650 font-semibold select-none">{csvError}</p>
+              <p id="contact-csv-error" className="text-[11px] text-destructive font-semibold select-none">{csvError}</p>
             )}
-
-            <div className="flex gap-2 select-none">
-              <Button
-                variant="outline"
-                className="flex-1 h-9 text-xs font-semibold border-[#CBD5E1] text-[#374151] hover:bg-slate-50 cursor-pointer"
-                onClick={handleSimulationImport}
-              >
-                Autoload Sim Dataset
-              </Button>
-            </div>
+            {importRowErrors.length > 0 && (
+              <ul className="text-[11px] text-destructive list-disc list-inside space-y-0.5">
+                {importRowErrors.map((rowError, idx) => (
+                  <li key={idx}>row {rowError.row}: {rowError.message}</li>
+                ))}
+              </ul>
+            )}
           </div>
 
-          <div className="p-3.5 border-t border-[#E5E7EB] bg-slate-50/50 flex justify-end gap-2.5 select-none">
+          <div className="p-3.5 border-t border-border bg-muted/50 flex justify-end gap-2.5 select-none">
             <Button
               type="button"
               variant="outline"
@@ -1280,14 +1332,15 @@ export default function ContactsView({
                 setShowImportModal(false);
                 setCsvContent('');
                 setCsvError('');
+                setImportRowErrors([]);
               }}
-              className="h-9 px-4 border border-[#E5E7EB] text-xs text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
+              className="h-9 px-4 border border-border text-xs text-foreground bg-card rounded-[6px] hover:bg-muted cursor-pointer"
             >
               Cancel
             </Button>
             <Button
               onClick={handleImportSubmit}
-              className="h-9 px-4 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold rounded-[6px] cursor-pointer"
+              className="h-9 px-4 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold rounded-[6px] cursor-pointer"
             >
               Submit Enterprise Importer
             </Button>

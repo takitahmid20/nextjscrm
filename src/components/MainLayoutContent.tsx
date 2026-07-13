@@ -6,40 +6,51 @@
 "use client";
 
 import React from 'react';
+import { usePathname } from 'next/navigation';
 import { useCRM } from '../context/CRMContext';
 import Sidebar from './Sidebar';
 import Navbar from './Navbar';
+import CommandPalette from './CommandPalette';
 
 export default function MainLayoutContent({ children }: { children: React.ReactNode }) {
   const { collapsedSidebar } = useCRM();
+  const pathname = usePathname();
+
+  // The auth screen is a standalone flow — it shouldn't render inside the
+  // signed-in app chrome (sidebar/navbar/footer).
+  if (pathname === '/auth') {
+    return <div className="min-h-screen bg-background">{children}</div>;
+  }
 
   return (
-    <div id="centric-crm-frame" className="min-h-screen bg-[#F5F6F8] font-sans">
+    <div id="centric-crm-frame" className="min-h-screen bg-background font-sans">
       {/* 1. Sidebar Nav Section */}
       <Sidebar />
 
       {/* 2. Scrollable Core Grid Spacing */}
-      <div 
+      <div
         id="crm-content-container"
-        className="transition-all duration-200 min-h-screen flex flex-col"
-        style={{ paddingLeft: collapsedSidebar ? '72px' : '260px' }}
+        className="transition-all duration-200 min-h-screen flex flex-col md:[padding-left:var(--crm-sidebar-w)] [--crm-sidebar-w:0px]"
+        style={{ ['--crm-sidebar-w' as string]: collapsedSidebar ? '72px' : '260px' }}
       >
         {/* Top Navbar Component */}
         <Navbar />
 
         {/* Dynamic workspace page render */}
-        <main 
-          id="crm-viewport" 
-          className="flex-1 p-6 max-w-7xl w-full mx-auto"
+        <main
+          id="crm-viewport"
+          className="flex-1 w-full p-4 md:p-6"
         >
           {children}
         </main>
 
-        {/* Corporate Status Footer */}
-        <footer className="py-4 border-t border-[#E5E7EB] bg-white text-center text-[#6B7280] text-[10px] uppercase tracking-wider select-none">
-          Centric CRM Suite • Fully Audited Cluster Sync Status: Operational • v4.2.0-secure • Local cache active 
+        {/* Status Footer */}
+        <footer className="py-4 border-t border-border bg-card text-center text-muted-foreground text-[10px] uppercase tracking-wider select-none">
+          Centric CRM Suite • v4.2.0
         </footer>
       </div>
+
+      <CommandPalette />
     </div>
   );
 }

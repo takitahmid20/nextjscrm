@@ -25,10 +25,11 @@ import {
   UserCog,
   Edit2,
   Mail,
-  MoreHorizontal
+  MoreHorizontal,
+  Loader2
 } from 'lucide-react';
 import { Lead, LeadStatus, LeadSource } from '../types';
-import { CRM_USERS, formatUSD, formatRelativeTime, exportLeadsToCSV, parseCSVToLeads } from '../utils';
+import { CRM_USERS, formatUSD, formatRelativeTime, exportLeadsToCSV, parseCSVToLeads, computeLeadScore, leadScoreTier } from '../utils';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,14 +42,21 @@ import { FormInput, FormSelect, FormTextarea, FormCheckbox, FormDatePicker } fro
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useCRM } from '../context/CRMContext';
+import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { UnifiedTable, UnifiedTableHeader } from './UnifiedTable';
+
+interface LeadImportResult {
+  importedCount: number;
+  errors: { row: number; message: string }[];
+}
 
 interface LeadsViewProps {
   leads: Lead[];
   onAddLead: (lead: Omit<Lead, 'id' | 'createdAt' | 'lastActivity'>) => void;
   onUpdateLead: (id: string, updated: Partial<Lead>) => void;
   onDeleteLeads: (ids: string[]) => void;
-  onImportLeads: (imported: Partial<Lead>[]) => void;
+  onImportLeads: (imported: Partial<Lead>[]) => Promise<LeadImportResult>;
   globalSearch: string;
 }
 
@@ -61,6 +69,8 @@ export default function LeadsView({
   globalSearch 
 }: LeadsViewProps) {
   const { addTask, currentUser } = useCRM();
+  const { showToast } = useToast();
+  const confirm = useConfirm();
 
   // Navigation & Page sizes
   const [currentPage, setCurrentPage] = useState(1);
@@ -74,10 +84,10 @@ export default function LeadsView({
   // Row action forms values
   const [noteContent, setNoteContent] = useState('');
   const [followupTitle, setFollowupTitle] = useState('');
-  const [followupDate, setFollowupDate] = useState('2026-06-01');
+  const [followupDate, setFollowupDate] = useState(new Date().toISOString().slice(0, 10));
   const [followupPriority, setFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('Medium');
   const [meetingTitle, setMeetingTitle] = useState('');
-  const [meetingDate, setMeetingDate] = useState('2026-06-01');
+  const [meetingDate, setMeetingDate] = useState(new Date().toISOString().slice(0, 10));
   const [selectedAssignee, setSelectedAssignee] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
@@ -102,12 +112,19 @@ export default function LeadsView({
   const [showImportModal, setShowImportModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState<Lead | null>(null);
 
+  // Deal value isn't part of leadSchema (which is shared with the Contact
+  // edit sheet), so it's tracked as its own field rather than folded into
+  // react-hook-form — keeps this form honest about a real value instead of
+  // the random placeholder this used to silently generate.
+  const [dealValueInput, setDealValueInput] = useState(0);
+  const [dealValueError, setDealValueError] = useState('');
+
   // Hook Form for enterprise lead creation validation
   const {
     register,
     handleSubmit,
     reset,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<LeadFormValues>({
     resolver: zodResolver(leadSchema),
     defaultValues: {
@@ -119,7 +136,7 @@ export default function LeadsView({
       phone: '',
       status: 'New',
       source: 'Website',
-      assignedTo: 'Sarah Jenkins',
+      assignedTo: currentUser?.name || 'Unassigned',
       notes: '',
       companyWebsite: '',
       facebook: '',
@@ -135,6 +152,7 @@ export default function LeadsView({
 
   const [csvContent, setCsvContent] = useState('');
   const [csvError, setCsvError] = useState('');
+  const [importRowErrors, setImportRowErrors] = useState<{ row: number; message: string }[]>([]);
 
   // Clear selections helper
   const handleToggleSelectAll = () => {
@@ -211,8 +229,12 @@ export default function LeadsView({
   const totalPages = Math.ceil(filteredLeads.length / rowsPerPage) || 1;
 
   // Bulk actions handlers
-  const handleBulkDelete = () => {
-    if (confirm(`Do you want to permanently delete these ${selectedLeadIds.length} leads from operations?`)) {
+  const handleBulkDelete = async () => {
+    if (await confirm({
+      description: `Do you want to permanently delete these ${selectedLeadIds.length} leads from operations?`,
+      destructive: true,
+      confirmLabel: 'Delete',
+    })) {
       onDeleteLeads(selectedLeadIds);
       setSelectedLeadIds([]);
     }
@@ -222,7 +244,7 @@ export default function LeadsView({
     selectedLeadIds.forEach(id => {
       onUpdateLead(id, { status, lastActivity: new Date().toISOString() });
     });
-    alert(`Bulk operations executed. Updated ${selectedLeadIds.length} records.`);
+    showToast(`Bulk operations executed. Updated ${selectedLeadIds.length} records.`, 'success');
     setSelectedLeadIds([]);
   };
 
@@ -230,12 +252,18 @@ export default function LeadsView({
     selectedLeadIds.forEach(id => {
       onUpdateLead(id, { assignedTo: userName, lastActivity: new Date().toISOString() });
     });
-    alert(`Bulk assignment executed. ${selectedLeadIds.length} leads assigned to ${userName}.`);
+    showToast(`Bulk assignment executed. ${selectedLeadIds.length} leads assigned to ${userName}.`, 'success');
     setSelectedLeadIds([]);
   };
 
   // Submit new lead form via React Hook Form schema validation
-  const handleCreateLeadSubmit = (values: LeadFormValues) => {
+  const handleCreateLeadSubmit = async (values: LeadFormValues) => {
+    if (dealValueInput < 0) {
+      setDealValueError('Deal value cannot be negative.');
+      return;
+    }
+    setDealValueError('');
+
     const computedName = `${values.firstName} ${values.lastName}`;
     const payload = {
       name: computedName,
@@ -259,20 +287,22 @@ export default function LeadsView({
         country: values.addressCountry,
       },
       priority: values.priority || 'Medium',
+      dealValue: dealValueInput,
     };
 
     if (editingLeadId) {
-      onUpdateLead(editingLeadId, {
+      await onUpdateLead(editingLeadId, {
         ...payload,
         lastActivity: `Lead details updated via unified form`
       });
-      alert(`Lead details for "${computedName}" updated successfully.`);
+      showToast(`Lead details for "${computedName}" updated successfully.`, 'success');
     } else {
-      onAddLead({
-        ...payload,
-        dealValue: Math.floor(Math.random() * 25) * 1000 + 4000, // Standard b2b range
-      });
-      alert(`New lead "${computedName}" created successfully.`);
+      const duplicate = values.email && leads.find(l => l.email.toLowerCase() === values.email.toLowerCase());
+      if (duplicate) {
+        showToast(`Heads up: "${duplicate.name}" already uses this email address.`, 'info');
+      }
+      await onAddLead(payload);
+      showToast(`New lead "${computedName}" created successfully.`, 'success');
     }
 
     // Reset Form & Close
@@ -281,7 +311,7 @@ export default function LeadsView({
     setShowAddModal(false);
   };
 
-  // Mock Export CSV action
+  // Export CSV action
   const handleExportCSV = () => {
     const csvStr = exportLeadsToCSV(leads);
     const blob = new Blob([csvStr], { type: 'text/csv;charset=utf-8;' });
@@ -294,30 +324,31 @@ export default function LeadsView({
     document.body.removeChild(link);
   };
 
-  // Live simulation import trigger
-  const handleSimulationImport = () => {
-    const simulationContent = `Lead Name,Company,Email,Phone,Deal Value ($),Status,Source,Assigned User\n"Diana Prince","Themyscira Exports","diana@ exports.io","+1 (555) 777-8888",45000,"New","Partnership","Alex Rivera"\n"Wayne Bruce","Wayne Enterprises","bruce@waynecorp.co","+1 (555) 999-0000",125000,"Qualified","Referral","Sarah Jenkins"\n"Clara Kent","Daily Planet Inc","clark@dailyplanet.org","+1 (555) 123-9876",15000,"Working","Cold Call","Elena Rostova"`;
-    setCsvContent(simulationContent);
-  };
-
-  const handleImportSubmit = () => {
+  const handleImportSubmit = async () => {
     if (!csvContent.trim()) {
       setCsvError('Please paste or load CSV text content.');
+      setImportRowErrors([]);
       return;
     }
     try {
       const parsed = parseCSVToLeads(csvContent);
       if (parsed.length === 0) {
         setCsvError('No valid leads parsed. Verify headings structure.');
+        setImportRowErrors([]);
         return;
       }
-      onImportLeads(parsed);
-      setShowImportModal(false);
-      setCsvContent('');
       setCsvError('');
-      alert(`Successfully imported ${parsed.length} enterprise leads.`);
+      const result = await onImportLeads(parsed);
+      setImportRowErrors(result.errors);
+      if (result.errors.length === 0) {
+        setShowImportModal(false);
+        setCsvContent('');
+      } else {
+        setCsvError(`${result.importedCount} row(s) imported, ${result.errors.length} row(s) failed:`);
+      }
     } catch (e: any) {
       setCsvError('Failed parsing CSV lines. Code: ' + e?.message);
+      setImportRowErrors([]);
     }
   };
 
@@ -325,23 +356,24 @@ export default function LeadsView({
   const tableHeaders: UnifiedTableHeader[] = [
     {
       key: 'select',
-      className: 'w-12 text-center sticky left-0 bg-[#F5F6F8] z-20 shadow-[1px_0_0_#CBD5E1] border-r border-[#E5E7EB]',
+      className: 'w-12 text-center sticky left-0 bg-muted z-20 shadow-[1px_0_0_var(--border)] border-r border-border',
       label: (
         <input
           type="checkbox"
+          aria-label="Select all leads on this page"
           checked={paginatedLeads.length > 0 && selectedLeadIds.length === paginatedLeads.length}
           onChange={handleToggleSelectAll}
-          className="h-4 w-4 rounded border-[#E5E7EB] text-[#2563EB] focus:ring-[#2563EB]/20 cursor-pointer"
+          className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20 cursor-pointer"
         />
       ),
     },
     {
       key: 'name',
-      className: 'sticky left-12 bg-[#F5F6F8] z-20 border-r border-slate-200 shadow-[1px_0_0_#CBD5E1] min-w-[200px]',
+      className: 'sticky left-12 bg-muted z-20 border-r border-border shadow-[1px_0_0_var(--border)] min-w-[200px]',
       label: (
         <div className="flex items-center space-x-1 select-none">
           <span>Lead Name & ID</span>
-          {sortField === 'name' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-[#2563EB]" /> : <ChevronDown className="h-3.5 w-3.5 text-[#2563EB]" />)}
+          {sortField === 'name' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-primary" /> : <ChevronDown className="h-3.5 w-3.5 text-primary" />)}
         </div>
       ),
       onClick: () => {
@@ -355,7 +387,7 @@ export default function LeadsView({
       label: (
         <div className="flex items-center space-x-1 select-none">
           <span>Company / Domain</span>
-          {sortField === 'company' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-[#2563EB]" /> : <ChevronDown className="h-3.5 w-3.5 text-[#2563EB]" />)}
+          {sortField === 'company' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-primary" /> : <ChevronDown className="h-3.5 w-3.5 text-primary" />)}
         </div>
       ),
       onClick: () => {
@@ -366,6 +398,7 @@ export default function LeadsView({
     },
     { key: 'contactInfo', label: 'Contact Info (Email/Phone)' },
     { key: 'status', label: 'Status' },
+    { key: 'score', label: 'Score' },
     { key: 'source', label: 'Acquisition' },
     { key: 'assignedTo', label: 'Assigned Manager' },
     {
@@ -374,7 +407,7 @@ export default function LeadsView({
       label: (
         <div className="flex items-center justify-end space-x-1 select-none">
           <span>Deal Value</span>
-          {sortField === 'dealValue' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-[#2563EB]" /> : <ChevronDown className="h-3.5 w-3.5 text-[#2563EB]" />)}
+          {sortField === 'dealValue' && (sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-primary" /> : <ChevronDown className="h-3.5 w-3.5 text-primary" />)}
         </div>
       ),
       onClick: () => {
@@ -383,25 +416,16 @@ export default function LeadsView({
         setCurrentPage(1);
       }
     },
-    { key: 'actions', className: 'text-center sticky right-0 bg-[#F5F6F8] z-20 border-l border-slate-200', label: 'Actions' }
+    { key: 'actions', className: 'text-center sticky right-0 bg-muted z-20 border-l border-border', label: 'Actions' }
   ];
 
   return (
     <div className="space-y-6">
-      <style dangerouslySetInnerHTML={{ __html: `
-        html, body, #crm-content-container, #centric-crm-frame, main, #crm-viewport {
-          -ms-overflow-style: none !important;
-          scrollbar-width: none !important;
-        }
-        html::-webkit-scrollbar, body::-webkit-scrollbar, #crm-content-container::-webkit-scrollbar, #centric-crm-frame::-webkit-scrollbar, main::-webkit-scrollbar, #crm-viewport::-webkit-scrollbar {
-          display: none !important;
-        }
-      `}} />
       {/* Top Title Section */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-2 md:space-y-0">
         <div>
-          <h1 className="text-28px font-semibold text-[#111827] tracking-tight">Leads & Account Entities</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-[28px] font-semibold text-foreground tracking-tight">Leads & Account Entities</h1>
+          <p className="text-sm text-muted-foreground">
             Comprehensive operational customer directory. Sort, batch, and filter pipelines.
           </p>
         </div>
@@ -412,9 +436,9 @@ export default function LeadsView({
             id="btn-import-csv"
             onClick={() => setShowImportModal(true)}
             variant="outline"
-            className="h-10 px-3.5 bg-white border border-[#E5E7EB] hover:bg-[#EFF6FF] text-[#111827] hover:text-[#2563EB] text-[13px] font-medium rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="h-10 px-3.5 bg-card border border-border hover:bg-primary/10 text-foreground hover:text-primary text-[13px] font-medium rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <Upload className="h-4 w-4 text-[#6B7280]" />
+            <Upload className="h-4 w-4 text-muted-foreground" />
             Import CSV
           </Button>
           
@@ -422,9 +446,9 @@ export default function LeadsView({
             id="btn-export-csv"
             onClick={handleExportCSV}
             variant="outline"
-            className="h-10 px-3.5 bg-white border border-[#E5E7EB] hover:bg-[#EFF6FF] text-[#111827] hover:text-[#2563EB] text-[13px] font-medium rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="h-10 px-3.5 bg-card border border-border hover:bg-primary/10 text-foreground hover:text-primary text-[13px] font-medium rounded-[6px] transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <Download className="h-4 w-4 text-[#6B7280]" />
+            <Download className="h-4 w-4 text-muted-foreground" />
             Export Data
           </Button>
 
@@ -441,7 +465,7 @@ export default function LeadsView({
                 phone: '',
                 status: 'New',
                 source: 'Website',
-                assignedTo: 'Sarah Jenkins',
+                assignedTo: currentUser?.name || 'Unassigned',
                 notes: '',
                 companyWebsite: '',
                 facebook: '',
@@ -453,9 +477,11 @@ export default function LeadsView({
                 addressCountry: '',
                 priority: 'Medium',
               });
+              setDealValueInput(0);
+              setDealValueError('');
               setShowAddModal(true);
             }}
-            className="h-10 px-4 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-[13px] font-medium rounded-[6px] transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+            className="h-10 px-4 bg-primary hover:bg-primary/90 text-primary-foreground text-[13px] font-medium rounded-[6px] transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
           >
             <Plus className="h-4.5 w-4.5" />
             Add Lead
@@ -464,12 +490,12 @@ export default function LeadsView({
       </div>
 
       {/* Leads Table Management Toolbar Box - Filters & Sorting */}
-      <Card className="bg-white border border-[#E5E7EB] rounded-[8px] p-4">
+      <Card className="bg-card border border-border rounded-[8px] p-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           
           {/* Search bar inside toolbar to lock workspace search */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5">
+            <label htmlFor="leads-toolbar-search" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5">
               Directory Filter Search
             </label>
             <Input
@@ -481,13 +507,13 @@ export default function LeadsView({
                 setLocalSearch(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full h-10 px-3 bg-white border border-[#E5E7EB] text-[#111827] text-xs rounded-[6px] focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]/20 outline-none"
+              className="w-full h-10 px-3 bg-card border border-border text-foreground text-xs rounded-[6px] focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
             />
           </div>
 
           {/* Filter Status */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+            <label htmlFor="leads-status-filter" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
               Operational Status
             </label>
             <FormSelect
@@ -507,7 +533,7 @@ export default function LeadsView({
 
           {/* Filter Lead Source */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+            <label htmlFor="leads-source-filter" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
               Acquisition Sourcing
             </label>
             <FormSelect
@@ -527,7 +553,7 @@ export default function LeadsView({
 
           {/* Filter Assigned Representative */}
           <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+            <label htmlFor="leads-user-filter" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
               Assigned Representative
             </label>
             <FormSelect
@@ -568,50 +594,51 @@ export default function LeadsView({
           const isChecked = selectedLeadIds.includes(lead.id);
           
           // Clean status highlights
-          let statusBg = 'bg-gray-100 text-gray-800 border-gray-200';
-          if (lead.status === 'Qualified') statusBg = 'bg-emerald-50 text-emerald-800 border-emerald-100';
-          else if (lead.status === 'Working' || lead.status === 'Contacted') statusBg = 'bg-blue-50 text-blue-800 border-blue-100';
-          else if (lead.status === 'Nurturing') statusBg = 'bg-indigo-50 text-indigo-800 border-indigo-100';
-          else if (lead.status === 'Unqualified') statusBg = 'bg-red-50 text-red-800 border-red-100';
+          let statusBg = 'bg-muted text-foreground border-border';
+          if (lead.status === 'Qualified') statusBg = 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 border-emerald-100 dark:border-emerald-800';
+          else if (lead.status === 'Working' || lead.status === 'Contacted') statusBg = 'bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 border-blue-100 dark:border-blue-800';
+          else if (lead.status === 'Nurturing') statusBg = 'bg-indigo-50 dark:bg-indigo-950/30 text-indigo-800 dark:text-indigo-300 border-indigo-100 dark:border-indigo-800';
+          else if (lead.status === 'Unqualified') statusBg = 'bg-red-50 dark:bg-red-950/30 text-red-800 dark:text-red-300 border-red-100 dark:border-red-800';
 
           return (
             <tr 
               key={lead.id}
-              className={`group h-[52px] border-b border-[#E5E7EB] transition-colors ${
-                isChecked ? 'bg-[#EFF6FF]/40' : 'hover:bg-slate-50'
+              className={`group h-[52px] border-b border-border transition-colors ${
+                isChecked ? 'bg-primary/10' : 'hover:bg-muted/50'
               }`}
             >
               {/* Checkbox column */}
-              <td className={`py-2.5 px-4 text-center sticky left-0 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-r border-[#E5E7EB]`}>
+              <td className={`py-2.5 px-4 text-center sticky left-0 z-10 transition-colors ${isChecked ? 'bg-primary/10' : 'bg-card group-hover:bg-muted'} border-r border-border`}>
                 <input
                   type="checkbox"
+                  aria-label={`Select ${lead.name}`}
                   checked={isChecked}
                   onChange={() => handleToggleSelectRow(lead.id)}
-                  className="h-4 w-4 rounded border-[#E5E7EB] text-[#2563EB] focus:ring-[#2563EB]/20 cursor-pointer"
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20 cursor-pointer"
                 />
               </td>
 
               {/* Lead Name & ID */}
-              <td className={`py-2.5 px-4 sticky left-12 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-r border-slate-200 min-w-[200px]`}>
+              <td className={`py-2.5 px-4 sticky left-12 z-10 transition-colors ${isChecked ? 'bg-primary/10' : 'bg-card group-hover:bg-muted'} border-r border-border min-w-[200px]`}>
                 <div className="flex flex-col">
                   <a 
                     href={`/lead-details/${lead.id}`}
-                    className="font-semibold text-[#2563EB] hover:text-[#1D4ED8] hover:underline text-[13px] text-left cursor-pointer"
+                    className="font-semibold text-primary hover:text-primary/90 hover:underline text-[13px] text-left cursor-pointer"
                   >
                     {lead.name}
                   </a>
-                  <span className="text-[10px] uppercase font-mono text-[#6B7280]">{lead.id}</span>
+                  <span className="text-[10px] uppercase font-mono text-muted-foreground">{lead.id}</span>
                 </div>
               </td>
 
               {/* Company Name */}
-              <td className="py-2.5 px-4 font-medium text-[#111827]">
+              <td className="py-2.5 px-4 font-medium text-foreground">
                 {lead.company}
               </td>
 
               {/* Contact details */}
               <td className="py-2.5 px-4">
-                <div className="flex flex-col text-[#6B7280]">
+                <div className="flex flex-col text-muted-foreground">
                   <span className="truncate max-w-[160px]">{lead.email}</span>
                   <span className="text-[11px]">{lead.phone}</span>
                 </div>
@@ -624,41 +651,61 @@ export default function LeadsView({
                 </span>
               </td>
 
+              {/* Lead score */}
+              <td className="py-2.5 px-4">
+                {(() => {
+                  const score = computeLeadScore(lead);
+                  const tier = leadScoreTier(score);
+                  const tierClass =
+                    tier === 'Hot'
+                      ? 'bg-destructive/10 text-destructive border-destructive/20'
+                      : tier === 'Warm'
+                      ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-400 border-amber-200 dark:border-amber-900/40'
+                      : 'bg-muted text-muted-foreground border-border';
+                  return (
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 border rounded-[4px] text-[11px] font-semibold font-mono ${tierClass}`} title={`${tier} lead — score ${score}/100`}>
+                      {score}
+                    </span>
+                  );
+                })()}
+              </td>
+
               {/* Sourcing Channel */}
-              <td className="py-2.5 px-4 font-mono text-[11px] text-[#6B7280]">
+              <td className="py-2.5 px-4 font-mono text-[11px] text-muted-foreground">
                 {lead.source}
               </td>
 
               {/* Assigned Representative */}
-              <td className="py-2.5 px-4 text-[#111827]">
+              <td className="py-2.5 px-4 text-foreground">
                 <div className="flex items-center space-x-1.5">
                   <span className="font-medium text-[12px]">{lead.assignedTo}</span>
                 </div>
               </td>
 
               {/* Value mapping */}
-              <td className="py-2.5 px-4 text-right font-semibold text-[#111827]">
+              <td className="py-2.5 px-4 text-right font-semibold text-foreground">
                 {formatUSD(lead.dealValue)}
               </td>
 
               {/* Row actions */}
-              <td className={`py-2.5 px-4 text-center sticky right-0 z-10 transition-colors ${isChecked ? 'bg-[#EFF6FF]' : 'bg-white group-hover:bg-slate-100'} border-l border-slate-200`}>
+              <td className={`py-2.5 px-4 text-center sticky right-0 z-10 transition-colors ${isChecked ? 'bg-primary/10' : 'bg-card group-hover:bg-muted'} border-l border-border`}>
                 <div className="flex items-center justify-center">
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
                         id={`leads-popover-trigger-${lead.id}`}
                         variant="ghost"
-                        className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full flex items-center justify-center cursor-pointer"
+                        aria-label={`Row actions for ${lead.name}`}
+                        className="h-8 w-8 p-0 hover:bg-muted rounded-full flex items-center justify-center cursor-pointer"
                       >
-                        <MoreVertical className="h-4.5 w-4.5 text-slate-500" />
+                        <MoreVertical className="h-4.5 w-4.5 text-muted-foreground" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-48 p-1 bg-white border border-[#E5E7EB] shadow-lg rounded-md z-40" align="end">
+                    <PopoverContent className="w-48 p-1 bg-card border border-border shadow-lg rounded-md z-40" align="end">
                       <div className="flex flex-col text-xs font-medium">
                         <a
                           href={`/lead-details/${lead.id}`}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground"
                         >
                           <Eye className="h-3.5 w-3.5 text-blue-500" />
                           <span>View Details</span>
@@ -671,7 +718,7 @@ export default function LeadsView({
                             setActiveActionType('notes');
                             setNoteContent('');
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer"
                         >
                           <MessageSquare className="h-3.5 w-3.5 text-indigo-500" />
                           <span>Add Note</span>
@@ -686,7 +733,7 @@ export default function LeadsView({
                             setFollowupDate(new Date().toISOString().slice(0, 10));
                             setFollowupPriority('Medium');
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer"
                         >
                           <CalendarDays className="h-3.5 w-3.5 text-amber-500" />
                           <span>Followups</span>
@@ -700,7 +747,7 @@ export default function LeadsView({
                             setMeetingTitle(`Meeting with ${lead.name}`);
                             setMeetingDate(new Date().toISOString().slice(0, 10));
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer"
                         >
                           <CalendarDays className="h-3.5 w-3.5 text-green-500" />
                           <span>Set Meeting</span>
@@ -713,7 +760,7 @@ export default function LeadsView({
                             setActiveActionType('assignee');
                             setSelectedAssignee(lead.assignedTo);
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer"
                         >
                           <UserCog className="h-3.5 w-3.5 text-cyan-500" />
                           <span>Change Assignee</span>
@@ -744,9 +791,11 @@ export default function LeadsView({
                               addressCountry: lead.addressInfo?.country || '',
                               priority: lead.priority || 'Medium',
                             });
+                            setDealValueInput(lead.dealValue || 0);
+                            setDealValueError('');
                             setShowAddModal(true);
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer"
                         >
                           <Edit2 className="h-3.5 w-3.5 text-purple-500" />
                           <span>Edit Lead</span>
@@ -758,24 +807,28 @@ export default function LeadsView({
                             setActiveActionLead(lead);
                             setActiveActionType('email');
                             setEmailSubject(`Followup: Core CRM context for ${lead.company}`);
-                            setEmailBody(`Hi ${lead.name},\n\nI wanted to reach out regarding our solution proposal...\n\nBest regards,\n${currentUser?.name || 'Sarah Jenkins'}`);
+                            setEmailBody(`Hi ${lead.name},\n\nI wanted to reach out regarding our solution proposal...\n\nBest regards,\n${currentUser?.name || 'Unassigned'}`);
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors rounded flex items-center gap-2 text-slate-700 cursor-pointer"
+                          className="w-full text-left px-3 py-2 hover:bg-muted transition-colors rounded flex items-center gap-2 text-foreground cursor-pointer"
                         >
                           <Mail className="h-3.5 w-3.5 text-sky-500" />
                           <span>Send Email</span>
                         </button>
 
-                        <div className="border-t border-slate-100 my-1"></div>
+                        <div className="border-t border-border my-1"></div>
 
                         <button
                           type="button"
-                          onClick={() => {
-                            if (confirm(`Are you sure you want to delete lead ${lead.name}?`)) {
+                          onClick={async () => {
+                            if (await confirm({
+                              description: `Are you sure you want to delete lead ${lead.name}?`,
+                              destructive: true,
+                              confirmLabel: 'Delete',
+                            })) {
                               onDeleteLeads([lead.id]);
                             }
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-red-50 text-red-600 transition-colors rounded flex items-center gap-2 cursor-pointer"
+                          className="w-full text-left px-3 py-2 hover:bg-destructive/10 text-destructive transition-colors rounded flex items-center gap-2 cursor-pointer"
                         >
                           <Trash2 className="h-3.5 w-3.5 text-red-500" />
                           <span>Delete Lead</span>
@@ -792,9 +845,9 @@ export default function LeadsView({
 
       {/* SIDE PANEL: ADD NEW CORPORATE LEAD */}
       <Sheet open={showAddModal} onOpenChange={setShowAddModal}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full">
-          <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F5F6F8]">
-            <SheetTitle className="font-semibold text-[#111827] text-[15px]">
+        <SheetContent side="right" className="w-full sm:max-w-2xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full">
+          <SheetHeader className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted">
+            <SheetTitle className="font-semibold text-foreground text-[15px]">
               {editingLeadId ? 'Update Lead Account Record' : 'Create Lead Account Record'}
             </SheetTitle>
           </SheetHeader>
@@ -871,8 +924,8 @@ export default function LeadsView({
             </div>
 
             {/* Address Information Section */}
-            <div className="border border-[#E2E8F0] rounded-[8px] p-4 bg-[#F8FAFC]">
-              <h4 className="text-[11px] font-bold text-[#475569] uppercase tracking-wide mb-3 flex items-center select-none">
+            <div className="border border-border rounded-[8px] p-4 bg-muted">
+              <h4 className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-3 flex items-center select-none">
                 <MapPin className="h-4 w-4 mr-1.5 text-slate-500" />
                 Address Information
               </h4>
@@ -917,7 +970,7 @@ export default function LeadsView({
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <FormSelect
                 label="Status"
                 register={register('status')}
@@ -949,6 +1002,23 @@ export default function LeadsView({
                   { value: 'Low', label: 'Low' },
                 ]}
               />
+
+              <div className="flex flex-col space-y-1.5 w-full">
+                <label htmlFor="lead-deal-value" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider select-none">
+                  Estimated Deal Value ($)
+                </label>
+                <input
+                  id="lead-deal-value"
+                  type="number"
+                  min={0}
+                  value={dealValueInput}
+                  onChange={(e) => setDealValueInput(Math.max(0, Number(e.target.value) || 0))}
+                  aria-invalid={!!dealValueError}
+                  aria-describedby={dealValueError ? 'lead-deal-value-error' : undefined}
+                  className="h-9 px-3 bg-background border border-border rounded-md text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                {dealValueError && <p id="lead-deal-value-error" role="alert" className="text-[11px] text-destructive font-medium">{dealValueError}</p>}
+              </div>
             </div>
 
             <FormTextarea
@@ -960,7 +1030,7 @@ export default function LeadsView({
             />
 
             {/* Action Operations */}
-            <div className="pt-3 border-t border-[#E5E7EB] flex items-center justify-end space-x-2">
+            <div className="pt-3 border-t border-border flex items-center justify-end space-x-2">
               <Button
                 type="button"
                 variant="outline"
@@ -969,15 +1039,17 @@ export default function LeadsView({
                   setEditingLeadId(null);
                   setShowAddModal(false);
                 }}
-                className="h-9 px-4 border border-[#E5E7EB] text-xs text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
+                className="h-9 px-4 border border-border text-xs text-foreground bg-card rounded-[6px] hover:bg-muted cursor-pointer"
               >
                 Cancel operations
               </Button>
               <Button
                 id="btn-lead-form-submit"
                 type="submit"
-                className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                disabled={isSubmitting}
+                className="h-9 px-4 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
               >
+                {isSubmitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 {editingLeadId ? 'Update account' : 'Create account'}
               </Button>
             </div>
@@ -987,57 +1059,66 @@ export default function LeadsView({
 
       {/* SIDE PANEL: IMPORT CSV CONSOLE */}
       <Sheet open={showImportModal} onOpenChange={setShowImportModal}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full">
-          <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F5F6F8]">
+        <SheetContent side="right" className="w-full sm:max-w-2xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full">
+          <SheetHeader className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted">
             <div className="flex items-center space-x-2">
-              <FolderSync className="h-4.5 w-4.5 text-[#2563EB]" />
-              <SheetTitle className="font-semibold text-[#111827] text-[15px]">Bulk CSV Enterprise Importer</SheetTitle>
+              <FolderSync className="h-4.5 w-4.5 text-primary" />
+              <SheetTitle className="font-semibold text-foreground text-[15px]">Bulk CSV Enterprise Importer</SheetTitle>
             </div>
           </SheetHeader>
 
           <div className="flex-1 overflow-y-auto p-5 space-y-4 crm-scrollbar">
-            <p className="text-xs text-[#6B7280] leading-relaxed">
+            <p className="text-xs text-muted-foreground leading-relaxed">
               Provide a raw CSV dataset representing customer records. Your column headers should map to:
-              <code className="bg-[#EFF6FF] text-[#2563EB] px-1 py-0.5 rounded ml-1 font-mono font-bold text-[10px]">
+              <code className="bg-primary/10 text-primary px-1 py-0.5 rounded ml-1 font-mono font-bold text-[10px]">
                 Lead Name, Company, Email, Phone, Deal Value ($), Status, Source
               </code>.
             </p>
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-semibold text-[#111827]">Insert raw text below:</label>
-                <button
-                  type="button"
-                  onClick={handleSimulationImport}
-                  className="text-[11px] text-[#2563EB] hover:text-blue-800 font-semibold underline cursor-pointer"
-                >
-                  Load enterprise simulation data
-                </button>
+                <label htmlFor="lead-csv-content" className="text-xs font-semibold text-foreground">Insert raw text below:</label>
               </div>
               <textarea
+                id="lead-csv-content"
                 rows={7}
                 value={csvContent}
+                aria-invalid={!!csvError}
+                aria-describedby={csvError ? 'lead-csv-error' : undefined}
                 onChange={(e) => {
                   setCsvContent(e.target.value);
                   setCsvError('');
+                  setImportRowErrors([]);
                 }}
                 placeholder='Lead Name,Company,Email,Phone,Deal Value ($),Status,Source&#10;"James Bond","MI6 Logistics","james@bond.gov","+44 (0) 700-007",85000,"Qualified","Referral"'
-                className="w-full p-3 font-mono text-[11px] border border-[#E5E7EB] rounded-[6px] outline-none focus:border-[#2563EB] bg-[#F5F6F8] crm-scrollbar"
+                className="w-full p-3 font-mono text-[11px] border border-border rounded-[6px] outline-none focus:border-primary bg-muted crm-scrollbar"
               />
-              
+
               {csvError && (
-                <p className="text-[11px] text-red-650 font-medium mt-1">{csvError}</p>
+                <p id="lead-csv-error" className="text-[11px] text-destructive font-medium mt-1">{csvError}</p>
+              )}
+              {importRowErrors.length > 0 && (
+                <ul className="mt-1 space-y-0.5 text-[11px] text-destructive list-disc list-inside">
+                  {importRowErrors.map((rowError, idx) => (
+                    <li key={idx}>row {rowError.row}: {rowError.message}</li>
+                  ))}
+                </ul>
               )}
             </div>
 
-            <div className="pt-3 border-t border-[#E5E7EB] flex items-center justify-between">
-              <span className="text-[10px] text-[#6B7280]">Supports standard RFC-4180 parsing compliance</span>
+            <div className="pt-3 border-t border-border flex items-center justify-between">
+              <span className="text-[10px] text-muted-foreground">Supports standard RFC-4180 parsing compliance</span>
               <div className="flex items-center space-x-2">
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setShowImportModal(false)}
-                  className="h-9 px-4 border border-[#E5E7EB] text-xs text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
+                  onClick={() => {
+                    setShowImportModal(false);
+                    setCsvContent('');
+                    setCsvError('');
+                    setImportRowErrors([]);
+                  }}
+                  className="h-9 px-4 border border-border text-xs text-foreground bg-card rounded-[6px] hover:bg-muted cursor-pointer"
                 >
                   Discard
                 </Button>
@@ -1045,7 +1126,7 @@ export default function LeadsView({
                   id="btn-import-leads-submit"
                   type="button"
                   onClick={handleImportSubmit}
-                  className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                  className="h-9 px-4 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer"
                 >
                   Integrate Records
                 </Button>
@@ -1057,73 +1138,73 @@ export default function LeadsView({
 
       {/* SIDE PANEL: DETAILED RECORD ACCOUNT VIEW */}
       <Sheet open={!!showDetailModal} onOpenChange={(open) => { if (!open) setShowDetailModal(null); }}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full">
+        <SheetContent side="right" className="w-full sm:max-w-2xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full">
           {showDetailModal && (
             <>
-              <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F5F6F8]">
+              <SheetHeader className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted">
                 <div>
-                  <SheetTitle className="font-semibold text-[#111827] text-[15px]">Lead Account Record Profile</SheetTitle>
-                  <p className="text-[10px] text-[#6B7280] font-mono mt-0.5">{showDetailModal.id}</p>
+                  <SheetTitle className="font-semibold text-foreground text-[15px]">Lead Account Record Profile</SheetTitle>
+                  <p className="text-[10px] text-muted-foreground font-mono mt-0.5">{showDetailModal.id}</p>
                 </div>
               </SheetHeader>
 
               <div className="flex-1 overflow-y-auto p-5 space-y-4 crm-scrollbar">
                 
-                <div className="flex items-center space-x-4 pb-4 border-b border-[#E5E7EB]">
-                  <div className="bg-[#EFF6FF] h-12 w-12 rounded-[6px] border border-blue-200 text-[#2563EB] flex items-center justify-center font-bold text-lg uppercase">
+                <div className="flex items-center space-x-4 pb-4 border-b border-border">
+                  <div className="bg-primary/10 h-12 w-12 rounded-[6px] border border-primary/20 text-primary flex items-center justify-center font-bold text-lg uppercase">
                     {showDetailModal.name.split(' ').map(n=>n[0]).join('')}
                   </div>
                   <div>
-                    <h3 className="text-16px font-bold text-[#111827]">{showDetailModal.name}</h3>
-                    <p className="font-semibold text-xs text-[#6B7280]">{showDetailModal.company}</p>
+                    <h3 className="text-[16px] font-bold text-foreground">{showDetailModal.name}</h3>
+                    <p className="font-semibold text-xs text-muted-foreground">{showDetailModal.company}</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 text-xs">
                   <div>
-                    <span className="text-[11px] text-[#6B7280] opacity-90">Corporate Email</span>
-                    <p className="font-semibold text-[#111827] mt-0.5">{showDetailModal.email}</p>
+                    <span className="text-[11px] text-muted-foreground opacity-90">Corporate Email</span>
+                    <p className="font-semibold text-foreground mt-0.5">{showDetailModal.email}</p>
                   </div>
                   <div>
-                    <span className="text-[11px] text-[#6B7280] opacity-90">Company Contact</span>
-                    <p className="font-semibold text-[#111827] mt-0.5">{showDetailModal.phone}</p>
+                    <span className="text-[11px] text-muted-foreground opacity-90">Company Contact</span>
+                    <p className="font-semibold text-foreground mt-0.5">{showDetailModal.phone}</p>
                   </div>
                   <div>
-                    <span className="text-[11px] text-[#6B7280] opacity-90">Marketing Sourcing</span>
-                    <p className="font-semibold text-[#111827] mt-0.5">{showDetailModal.source}</p>
+                    <span className="text-[11px] text-muted-foreground opacity-90">Marketing Sourcing</span>
+                    <p className="font-semibold text-foreground mt-0.5">{showDetailModal.source}</p>
                   </div>
                   <div>
-                    <span className="text-[11px] text-[#6B7280] opacity-90">Corporate Estimated Value</span>
-                    <p className="font-semibold text-[#2563EB] mt-0.5 text-14px">{formatUSD(showDetailModal.dealValue)}</p>
+                    <span className="text-[11px] text-muted-foreground opacity-90">Corporate Estimated Value</span>
+                    <p className="font-semibold text-primary mt-0.5 text-[14px]">{formatUSD(showDetailModal.dealValue)}</p>
                   </div>
                   <div>
-                    <span className="text-[11px] text-[#6B7280] opacity-90">Lead Status</span>
+                    <span className="text-[11px] text-muted-foreground opacity-90">Lead Status</span>
                     <div className="mt-1">
-                      <span className="px-2 py-0.5 border bg-blue-50 border-blue-100 text-blue-800 rounded-[4px] font-medium text-[11px]">
+                      <span className="px-2 py-0.5 border bg-blue-50 dark:bg-blue-950/30 border-blue-100 dark:border-blue-800 text-blue-800 dark:text-blue-300 rounded-[4px] font-medium text-[11px]">
                         {showDetailModal.status}
                       </span>
                     </div>
                   </div>
                   <div>
-                    <span className="text-[11px] text-[#6B7280] opacity-90">Representative in Charge</span>
-                    <p className="font-semibold text-[#111827] mt-0.5">{showDetailModal.assignedTo}</p>
+                    <span className="text-[11px] text-muted-foreground opacity-90">Representative in Charge</span>
+                    <p className="font-semibold text-foreground mt-0.5">{showDetailModal.assignedTo}</p>
                   </div>
                 </div>
 
-                <div className="bg-[#F5F6F8] p-3 border border-[#E5E7EB] rounded-[6px]">
-                  <span className="text-[11px] font-semibold text-[#6B7280] block mb-1">CRM Log Notes:</span>
-                  <p className="text-xs text-[#111827] leading-relaxed font-sans">
+                <div className="bg-muted p-3 border border-border rounded-[6px]">
+                  <span className="text-[11px] font-semibold text-muted-foreground block mb-1">CRM Log Notes:</span>
+                  <p className="text-xs text-foreground leading-relaxed font-sans">
                     {showDetailModal.notes || 'No notes are attached to this customer file record.'}
                   </p>
                 </div>
 
-                <div className="pt-3 border-t border-[#E5E7EB] flex items-center justify-between text-[11px] text-[#6B7280]">
+                <div className="pt-3 border-t border-border flex items-center justify-between text-[11px] text-muted-foreground">
                   <span>Registered system trace: {formatRelativeTime(showDetailModal.createdAt)}</span>
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => setShowDetailModal(null)}
-                    className="h-9 px-4 border border-[#E5E7EB] text-xs text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 font-medium cursor-pointer"
+                    className="h-9 px-4 border border-border text-xs text-foreground bg-card rounded-[6px] hover:bg-muted font-medium cursor-pointer"
                   >
                     Close file
                   </Button>
@@ -1137,19 +1218,19 @@ export default function LeadsView({
 
       {/* SIDE PANEL: INDIVIDUAL ROW ACTION SYSTEM */}
       <Sheet open={!!activeActionLead && !!activeActionType} onOpenChange={(open) => { if (!open) { setActiveActionLead(null); setActiveActionType(null); } }}>
-        <SheetContent side="right" className="w-full sm:max-w-xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-50">
+        <SheetContent side="right" className="w-full sm:max-w-xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full z-50">
           {activeActionLead && activeActionType && (
             <>
-              <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F5F6F8]">
+              <SheetHeader className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted">
                 <div>
-                  <SheetTitle className="font-semibold text-[#111827] text-[15px] capitalize">
+                  <SheetTitle className="font-semibold text-foreground text-[15px] capitalize">
                     {activeActionType === 'notes' && 'Add Corporate Log Note'}
                     {activeActionType === 'followup' && 'Schedule Customer Followup'}
                     {activeActionType === 'meeting' && 'Set Corporate Briefing Meeting'}
                     {activeActionType === 'assignee' && 'Reassign Account Representative'}
                     {activeActionType === 'email' && 'Dispatch Corporate Email Message'}
                   </SheetTitle>
-                  <p className="text-[10px] text-[#6B7280] font-mono mt-0.5">
+                  <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
                     Lead: {activeActionLead.name} ({activeActionLead.company})
                   </p>
                 </div>
@@ -1160,22 +1241,23 @@ export default function LeadsView({
                 {activeActionType === 'notes' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none text-[11.5px]">
+                      <label htmlFor="lead-note-content" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none text-[11.5px]">
                         Note Content Text
                       </label>
                       <textarea
+                        id="lead-note-content"
                         rows={6}
                         value={noteContent}
                         onChange={(e) => setNoteContent(e.target.value)}
                         placeholder="Type standard enterprise call brief or feedback comments..."
-                        className="w-full p-3 font-sans text-xs border border-[#E5E7EB] rounded-[6px] outline-none focus:border-[#2563EB] bg-[#F5F6F8] crm-scrollbar"
+                        className="w-full p-3 font-sans text-xs border border-border rounded-[6px] outline-none focus:border-primary bg-muted crm-scrollbar"
                       />
                     </div>
                     <Button
                       type="button"
                       onClick={() => {
                         if (!noteContent) {
-                          alert('Note content is required.');
+                          showToast('Note content is required.', 'error');
                           return;
                         }
                         const rawHistory = activeActionLead.notes_history || [];
@@ -1183,17 +1265,17 @@ export default function LeadsView({
                           id: `NOTE-${Date.now()}`,
                           content: noteContent,
                           date: new Date().toISOString().slice(0, 10),
-                          author: currentUser?.name || 'Sarah Jenkins'
+                          author: currentUser?.name || 'Unassigned'
                         };
                         onUpdateLead(activeActionLead.id, {
                           notes_history: [...rawHistory, newNote],
                           notes: noteContent
                         });
-                        alert(`Note added successfully to ${activeActionLead.name}.`);
+                        showToast(`Note added successfully to ${activeActionLead.name}.`, 'success');
                         setActiveActionLead(null);
                         setActiveActionType(null);
                       }}
-                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                      className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer"
                     >
                       Save CRM Log Note
                     </Button>
@@ -1204,20 +1286,21 @@ export default function LeadsView({
                 {activeActionType === 'followup' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                      <label htmlFor="lead-followup-title" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                         Followup Task Title
                       </label>
                       <Input
+                        id="lead-followup-title"
                         type="text"
                         value={followupTitle}
                         onChange={(e) => setFollowupTitle(e.target.value)}
                         placeholder="e.g. Call back regarding pricing models"
-                        className="w-full h-9 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] pb-1.5 pt-1.5"
+                        className="w-full h-9 text-xs border border-border rounded-[6px] bg-muted pb-1.5 pt-1.5"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                           Expected Due Date
                         </label>
                         <FormDatePicker
@@ -1228,13 +1311,14 @@ export default function LeadsView({
                         />
                       </div>
                       <div>
-                        <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                        <label htmlFor="lead-followup-priority" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                           Task Urgency Priority
                         </label>
                         <select
+                          id="lead-followup-priority"
                           value={followupPriority}
                           onChange={(e) => setFollowupPriority(e.target.value as any)}
-                          className="w-full h-9 px-3 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none focus:border-[#2563EB]"
+                          className="w-full h-9 px-3 text-xs border border-border rounded-[6px] bg-muted outline-none focus:border-primary"
                         >
                           <option value="Low">Low</option>
                           <option value="Medium">Medium</option>
@@ -1246,7 +1330,7 @@ export default function LeadsView({
                       type="button"
                       onClick={() => {
                         if (!followupTitle) {
-                          alert('Followup title is required.');
+                          showToast('Followup title is required.', 'error');
                           return;
                         }
                         addTask({
@@ -1254,16 +1338,16 @@ export default function LeadsView({
                           dueDate: followupDate,
                           priority: followupPriority,
                           status: 'Pending',
-                          assignedTo: activeActionLead.assignedTo || 'Sarah Jenkins',
+                          assignedTo: activeActionLead.assignedTo || currentUser?.name || 'Unassigned',
                           category: 'Follow-up',
                           relatedToType: 'Lead',
                           relatedToName: activeActionLead.name
                         });
-                        alert(`Followup task scheduled for ${activeActionLead.name}.`);
+                        showToast(`Followup task scheduled for ${activeActionLead.name}.`, 'success');
                         setActiveActionLead(null);
                         setActiveActionType(null);
                       }}
-                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                      className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer"
                     >
                       Schedule Task
                     </Button>
@@ -1274,19 +1358,20 @@ export default function LeadsView({
                 {activeActionType === 'meeting' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                      <label htmlFor="lead-meeting-title" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                         Briefing / Meeting Subject
                       </label>
                       <Input
+                        id="lead-meeting-title"
                         type="text"
                         value={meetingTitle}
                         onChange={(e) => setMeetingTitle(e.target.value)}
                         placeholder="e.g. Solution demo presentation"
-                        className="w-full h-9 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] pb-1.5 pt-1.5"
+                        className="w-full h-9 text-xs border border-border rounded-[6px] bg-muted pb-1.5 pt-1.5"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                         Meeting Date
                       </label>
                       <FormDatePicker
@@ -1300,7 +1385,7 @@ export default function LeadsView({
                       type="button"
                       onClick={() => {
                         if (!meetingTitle) {
-                          alert('Meeting subject is required.');
+                          showToast('Meeting subject is required.', 'error');
                           return;
                         }
                         addTask({
@@ -1308,16 +1393,16 @@ export default function LeadsView({
                           dueDate: meetingDate,
                           priority: 'High',
                           status: 'Pending',
-                          assignedTo: activeActionLead.assignedTo || 'Sarah Jenkins',
+                          assignedTo: activeActionLead.assignedTo || currentUser?.name || 'Unassigned',
                           category: 'Meeting',
                           relatedToType: 'Lead',
                           relatedToName: activeActionLead.name
                         });
-                        alert(`Meeting booked with ${activeActionLead.name}.`);
+                        showToast(`Meeting booked with ${activeActionLead.name}.`, 'success');
                         setActiveActionLead(null);
                         setActiveActionType(null);
                       }}
-                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                      className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer"
                     >
                       Book Meeting
                     </Button>
@@ -1328,13 +1413,14 @@ export default function LeadsView({
                 {activeActionType === 'assignee' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                      <label htmlFor="lead-assignee-select" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                         Select Representative
                       </label>
                       <select
+                        id="lead-assignee-select"
                         value={selectedAssignee}
                         onChange={(e) => setSelectedAssignee(e.target.value)}
-                        className="w-full h-9 px-3 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] outline-none focus:border-[#2563EB]"
+                        className="w-full h-9 px-3 text-xs border border-border rounded-[6px] bg-muted outline-none focus:border-primary"
                       >
                         {CRM_USERS.map(u => (
                           <option key={u.name} value={u.name}>{u.name} - ({u.role})</option>
@@ -1345,11 +1431,11 @@ export default function LeadsView({
                       type="button"
                       onClick={() => {
                         onUpdateLead(activeActionLead.id, { assignedTo: selectedAssignee });
-                        alert(`Lead updated. Reassigned to ${selectedAssignee}.`);
+                        showToast(`Lead updated. Reassigned to ${selectedAssignee}.`, 'success');
                         setActiveActionLead(null);
                         setActiveActionType(null);
                       }}
-                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                      className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer"
                     >
                       Change Representative
                     </Button>
@@ -1360,56 +1446,59 @@ export default function LeadsView({
                 {activeActionType === 'email' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                      <label htmlFor="lead-email-recipient" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                         Recipient Address
                       </label>
                       <Input
+                        id="lead-email-recipient"
                         type="text"
                         disabled
                         value={activeActionLead.email}
-                        className="w-full h-9 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F3F4F6] text-slate-500 cursor-not-allowed pb-1.5 pt-1.5"
+                        className="w-full h-9 text-xs border border-border rounded-[6px] bg-muted text-muted-foreground cursor-not-allowed pb-1.5 pt-1.5"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                      <label htmlFor="lead-email-subject" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                         Email Subject
                       </label>
                       <Input
+                        id="lead-email-subject"
                         type="text"
                         value={emailSubject}
                         onChange={(e) => setEmailSubject(e.target.value)}
                         placeholder="Subject..."
-                        className="w-full h-9 text-xs border border-[#E5E7EB] rounded-[6px] bg-[#F5F6F8] pb-1.5 pt-1.5"
+                        className="w-full h-9 text-xs border border-border rounded-[6px] bg-muted pb-1.5 pt-1.5"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-medium uppercase tracking-wider text-[#6B7280] mb-1.5 select-none">
+                      <label htmlFor="lead-email-body" className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5 select-none">
                         Mail Body Content
                       </label>
                       <textarea
+                        id="lead-email-body"
                         rows={6}
                         value={emailBody}
                         onChange={(e) => setEmailBody(e.target.value)}
                         placeholder="Body..."
-                        className="w-full p-3 font-sans text-xs border border-[#E5E7EB] rounded-[6px] outline-none focus:border-[#2563EB] bg-[#F5F6F8] crm-scrollbar"
+                        className="w-full p-3 font-sans text-xs border border-border rounded-[6px] outline-none focus:border-primary bg-muted crm-scrollbar"
                       />
                     </div>
                     <Button
                       type="button"
                       onClick={() => {
                         if (!emailSubject || !emailBody) {
-                          alert('Email subject and body are required.');
+                          showToast('Email subject and body are required.', 'error');
                           return;
                         }
                         // Add activity to show an email was sent trace log
                         onUpdateLead(activeActionLead.id, {
                           lastActivity: `Core corporate email sent regarding "${emailSubject}"`
                         });
-                        alert(`Corporate email dispatched successfully to ${activeActionLead.email}.`);
+                        showToast(`Corporate email dispatched successfully to ${activeActionLead.email}.`, 'success');
                         setActiveActionLead(null);
                         setActiveActionType(null);
                       }}
-                      className="w-full h-9 bg-[#2563EB] text-white hover:bg-[#1D4ED8] text-xs font-semibold rounded-[6px] cursor-pointer"
+                      className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold rounded-[6px] cursor-pointer"
                     >
                       Send Message
                     </Button>
@@ -1419,14 +1508,14 @@ export default function LeadsView({
 
               </div>
 
-              <div className="p-3 border-t border-[#E5E7EB] bg-[#F5F6F8] flex justify-end">
+              <div className="p-3 border-t border-border bg-muted flex justify-end">
                 <Button
                   type="button"
                   onClick={() => {
                     setActiveActionLead(null);
                     setActiveActionType(null);
                   }}
-                  className="h-8 px-4 border border-[#E5E7EB] text-xs text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 cursor-pointer"
+                  className="h-8 px-4 border border-border text-xs text-foreground bg-card rounded-[6px] hover:bg-muted cursor-pointer"
                 >
                   Close Panel
                 </Button>
@@ -1440,7 +1529,7 @@ export default function LeadsView({
       {selectedLeadIds.length > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-xs text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-4.5 z-55 border border-slate-800 text-xs animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-center gap-2 pr-3 border-r border-slate-800 font-medium whitespace-nowrap select-none">
-            <span className="h-2 w-2 rounded-full bg-[#2563EB] animate-pulse"></span>
+            <span className="h-2 w-2 rounded-full bg-primary animate-pulse"></span>
             <span>Selected <strong className="text-blue-400 font-bold">{selectedLeadIds.length}</strong> records</span>
           </div>
 
@@ -1448,11 +1537,12 @@ export default function LeadsView({
             {/* Direct Select - Reassign Rep */}
             <select
               value=""
+              aria-label="Reassign selected leads to representative"
               onChange={(e) => {
                 const val = e.target.value;
                 if (val) handleBulkAssign(val);
               }}
-              className="bg-slate-800 hover:bg-slate-755 border border-slate-700 text-white rounded-[6px] px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer transition-colors max-w-[130px] truncate"
+              className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-[6px] px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer transition-colors max-w-[130px] truncate"
             >
               <option value="">Reassign To...</option>
               {CRM_USERS.map(u => (
@@ -1463,11 +1553,12 @@ export default function LeadsView({
             {/* Direct Select - Change Status */}
             <select
               value=""
+              aria-label="Change status of selected leads"
               onChange={(e) => {
                 const val = e.target.value;
                 if (val) handleBulkStatusChange(val as LeadStatus);
               }}
-              className="bg-slate-800 hover:bg-slate-755 border border-slate-700 text-white rounded-[6px] px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer transition-colors max-w-[130px] truncate"
+              className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-[6px] px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer transition-colors max-w-[130px] truncate"
             >
               <option value="">Status...</option>
               {statusOptions.map(opt => (
@@ -1487,6 +1578,7 @@ export default function LeadsView({
             {/* Unselect All trigger */}
             <button
               onClick={() => setSelectedLeadIds([])}
+              aria-label="Clear selections"
               className="p-1 rounded-full text-slate-400 hover:bg-slate-800 hover:text-white transition"
               title="Clear Selections"
             >

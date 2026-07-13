@@ -4,58 +4,81 @@ import React, { useState, useEffect } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { FormSelect } from '../forms/FormControls';
+import { FormSelect, FormDatePicker } from '../forms/FormControls';
 import { CRM_USERS } from '../../utils';
+import { Deal, DealStage } from '../../types';
+import { opportunityDealSchema } from '../../validation';
 
 interface CRMOpportunityDealSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   company: string;
   assignedTo: string;
-  onAddDeal: (deal: any) => void;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
+  onAddDeal: (deal: Omit<Deal, 'id' | 'createdAt'>) => void;
 }
+
+const STAGE_OPTIONS: DealStage[] = ['Lead In', 'Contact Made', 'Demo Scheduled', 'Proposal Sent', 'Negotiation'];
 
 export default function CRMOpportunityDealSheet({
   open,
   onOpenChange,
   company,
   assignedTo,
+  contactName,
+  contactEmail,
+  contactPhone,
   onAddDeal,
 }: CRMOpportunityDealSheetProps) {
   const [dealTitle, setDealTitle] = useState('');
   const [dealValue, setDealValue] = useState(25000);
-  const [dealStage, setDealStage] = useState('Lead In');
-  const [expectedCloseDate, setExpectedCloseDate] = useState('2026-06-30');
+  const [dealStage, setDealStage] = useState<DealStage>('Lead In');
+  const [expectedCloseDate, setExpectedCloseDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [rep, setRep] = useState('Sarah Jenkins');
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (open) {
       setDealTitle(`${company} Partnership Deal`);
       setDealValue(25000);
       setDealStage('Lead In');
-      setExpectedCloseDate('2026-06-30');
+      setExpectedCloseDate(new Date().toISOString().slice(0, 10));
       setRep(assignedTo || 'Sarah Jenkins');
+      setErrors({});
     }
   }, [open, company, assignedTo]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dealTitle.trim()) {
-      alert('Please fill out contract opportunity title.');
-      return;
-    }
 
-    onAddDeal({
+    const parsed = opportunityDealSchema.safeParse({
       title: dealTitle,
-      company,
       value: dealValue,
       stage: dealStage,
-      status: 'Open',
-      contactPerson: 'Liaison Office',
-      email: 'sales@company.com',
-      phone: '+1 (555) 000-0000',
       expectedCloseDate,
-      assignedTo: rep
+      assignedTo: rep,
+    });
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) fieldErrors[String(issue.path[0])] = issue.message;
+      setErrors(fieldErrors);
+      return;
+    }
+    setErrors({});
+
+    onAddDeal({
+      title: parsed.data.title,
+      company,
+      value: parsed.data.value,
+      stage: parsed.data.stage as DealStage,
+      status: 'Open',
+      contactPerson: contactName || 'Unassigned contact',
+      email: contactEmail || '',
+      phone: contactPhone || '',
+      expectedCloseDate: parsed.data.expectedCloseDate,
+      assignedTo: parsed.data.assignedTo,
     });
 
     onOpenChange(false);
@@ -63,103 +86,85 @@ export default function CRMOpportunityDealSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-2xl bg-white border-l border-[#E5E7EB] shadow-2xl p-0 flex flex-col h-full z-45">
-        <SheetHeader className="px-5 py-4 border-b border-[#E5E7EB] flex items-center justify-between bg-[#F5F6F8]">
-          <SheetTitle className="font-semibold text-[#111827] text-[15px]">
-            Create Deal Contract Opportunity
+      <SheetContent side="right" className="w-full sm:max-w-2xl bg-card border-l border-border shadow-2xl p-0 flex flex-col h-full z-45">
+        <SheetHeader className="px-5 py-4 border-b border-border flex items-center justify-between bg-muted/40">
+          <SheetTitle className="font-semibold text-foreground text-[15px]">
+            Create deal opportunity
           </SheetTitle>
         </SheetHeader>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 text-xs text-[#111827] crm-scrollbar">
-          
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 text-xs text-foreground crm-scrollbar" noValidate>
+
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider">
-              Deal Proposal / Contract Title *
+            <label htmlFor="opp-title" className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Deal title *
             </label>
             <Input
-              required
+              id="opp-title"
               value={dealTitle}
               onChange={e => setDealTitle(e.target.value)}
               placeholder="e.g. Acme ERP Integration Package"
-              className="h-10 text-xs border-[#CBD5E1]"
+              className="h-10 text-xs"
+              aria-invalid={!!errors.title}
             />
+            {errors.title && <p className="text-destructive">{errors.title}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider">
-                Associated Corporate Entity
+              <label htmlFor="opp-company" className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Associated account
               </label>
-              <Input
-                disabled
-                value={company}
-                className="h-10 text-xs border-[#CBD5E1] bg-slate-50 cursor-not-allowed"
-              />
+              <Input id="opp-company" disabled value={company} className="h-10 text-xs bg-muted cursor-not-allowed" />
             </div>
-            
+
             <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider">
-                Estimated Contract Value ($) *
+              <label htmlFor="opp-value" className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Contract value ($) *
               </label>
               <Input
-                required
+                id="opp-value"
                 type="number"
                 value={dealValue}
                 onChange={e => setDealValue(Number(e.target.value) || 0)}
                 placeholder="e.g. 15000"
-                className="h-10 text-xs border-[#CBD5E1]"
+                className="h-10 text-xs"
+                aria-invalid={!!errors.value}
               />
+              {errors.value && <p className="text-destructive">{errors.value}</p>}
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <FormSelect
-              label="Initial Funnel Stage"
+              label="Initial stage"
               value={dealStage}
-              onChange={setDealStage}
-              options={[
-                { value: 'Lead In', label: 'Lead In' },
-                { value: 'Contact Made', label: 'Contact Made' },
-                { value: 'Demo Scheduled', label: 'Demo Scheduled' },
-                { value: 'Proposal Sent', label: 'Proposal Sent' },
-                { value: 'Negotiation', label: 'Negotiation' }
-              ]}
+              onChange={(val) => setDealStage(val as DealStage)}
+              options={STAGE_OPTIONS.map(st => ({ value: st, label: st }))}
             />
-            
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-wider">
-                Expected Close Date
-              </label>
-              <input
-                type="date"
-                value={expectedCloseDate}
-                onChange={e => setExpectedCloseDate(e.target.value)}
-                className="w-full h-10 px-3 border border-[#CBD5E1] rounded-[6px] text-xs bg-white text-[#374151]"
-              />
-            </div>
+
+            <FormDatePicker
+              label="Expected close date"
+              registerName="expectedCloseDate"
+              setValue={(_name, val) => setExpectedCloseDate(val)}
+              value={expectedCloseDate}
+              error={errors.expectedCloseDate}
+            />
 
             <FormSelect
-              label="Responsible Sales Rep"
+              label="Responsible rep"
               value={rep}
               onChange={setRep}
               options={CRM_USERS.map(u => ({ value: u.name, label: u.name }))}
             />
           </div>
 
-          <div className="pt-3 border-t border-[#E5E7EB] flex items-center justify-end space-x-2 select-none">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              className="h-9 px-4 border border-[#E5E7EB] text-[#111827] bg-white rounded-[6px] hover:bg-slate-50 font-medium cursor-pointer"
-            >
-              Discard Offer
+          <div className="pt-3 border-t border-border flex items-center justify-end space-x-2 select-none">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Discard
             </Button>
-            <Button
-              type="submit"
-              className="h-9 px-4 bg-[#2563EB] text-white hover:bg-[#1D4ED8] font-bold rounded-[6px] cursor-pointer"
-            >
-              Create Deal Funnel
+            <Button type="submit">
+              Create deal
             </Button>
           </div>
 
