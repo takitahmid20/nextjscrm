@@ -1,4 +1,4 @@
-# Shuttle CRM Workspace
+# Takimac CRM Workspace
 
 A robust, highly practical SaaS CRM dashboard designed for sales teams, featuring comprehensive lead tables, pipelines, and task management built on Next.js 15, React 19, Tailwind CSS, and TypeScript.
 
@@ -6,7 +6,7 @@ A robust, highly practical SaaS CRM dashboard designed for sales teams, featurin
 
 ## ⚡ Vercel Deployment Guide
 
-Shuttle CRM is fully compatible with Vercel out of the box. Follow these simple steps to deploy:
+Takimac CRM is fully compatible with Vercel out of the box. Follow these simple steps to deploy:
 
 ### 1. Simple GitHub Import (Recommended)
 

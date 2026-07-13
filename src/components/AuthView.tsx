@@ -3,392 +3,397 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+"use client";
+
 import React, { useState } from 'react';
-import { ShieldCheck, Mail, Lock, Building, ArrowLeft, RefreshCw, KeyRound, Check } from 'lucide-react';
+import { ShieldCheck, Mail, Lock, Building, User, ArrowLeft, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import {
+  loginSchema, LoginFormValues,
+  signupSchema, SignupFormValues,
+  forgotPasswordSchema, ForgotPasswordFormValues,
+  verifyOtpSchema, VerifyOtpFormValues,
+} from '../validation';
+import { useAuth } from '../context/AuthContext';
+import { ApiError } from '../lib/api/http';
+
+type Panel = 'signin' | 'signup' | 'forgot' | 'otp';
 
 interface AuthViewProps {
-  onSuccessLogin: (name: string, role: string) => void;
-  onExitAuthPreview: () => void;
+  onAuthenticated: () => void;
 }
 
-export default function AuthView({ onSuccessLogin, onExitAuthPreview }: AuthViewProps) {
-  // Switch between panels: 'signin' | 'signup' | 'forgot' | 'otp'
-  const [panel, setPanel] = useState<'signin' | 'signup' | 'forgot' | 'otp'>('signin');
-  
-  // Real interactive typing states
-  const [emailText, setEmailText] = useState('takitahmid20@gmail.com');
-  const [passwordText, setPasswordText] = useState('••••••••••••');
-  const [fullNameText, setFullNameText] = useState('Taki Tahmid');
-  const [companyNameText, setCompanyNameText] = useState('Acme Agency Ltd');
-  const [otpText, setOtpText] = useState(['5', '9', '2', '0', '1', '4']);
+export default function AuthView({ onAuthenticated }: AuthViewProps) {
+  const { login, signup, forgotPassword, verifyOtp } = useAuth();
+  const [panel, setPanel] = useState<Panel>('signin');
+  const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [otpEmail, setOtpEmail] = useState('');
+  const [otpHint, setOtpHint] = useState<string | null>(null);
 
-  const handleSignIn = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!emailText || !passwordText) {
-      setAuthError('Mandatory corporate logins missing.');
-      return;
-    }
-    // Simulate logging in
-    onSuccessLogin(fullNameText || 'Taki Tahmid', 'Principal account executive');
-    alert('Mock Login Authorized! Authenticating session.');
-  };
+  const signInForm = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: '', password: '' },
+  });
 
-  const handleSignUp = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!fullNameText || !companyNameText || !emailText) {
-      setAuthError('Please fill in required fields.');
-      return;
-    }
-    alert(`Account for ${companyNameText} registered securely! Requesting OTP Token.`);
-    setPanel('otp');
-  };
+  const signUpForm = useForm<SignupFormValues>({
+    resolver: zodResolver(signupSchema),
+    defaultValues: { fullName: '', companyName: '', email: '', password: '' },
+  });
 
-  const handleForgotPassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!emailText) {
-      setAuthError('Please input registered work email.');
-      return;
-    }
-    alert(`OTP recovery token dispatched to: ${emailText}`);
-    setPanel('otp');
-  };
+  const forgotForm = useForm<ForgotPasswordFormValues>({
+    resolver: zodResolver(forgotPasswordSchema),
+    defaultValues: { email: '' },
+  });
 
-  const handleVerifyOTP = (e: React.FormEvent) => {
-    e.preventDefault();
-    const joined = otpText.join('');
-    if (joined.length !== 6) {
-      setAuthError('OTP requires six-digit transaction code.');
-      return;
-    }
-    onSuccessLogin(fullNameText, 'Global Sales Executive');
-    alert(`OTP verified! Session token created for company ${companyNameText || 'Centric Corp'}.`);
-  };
+  const otpForm = useForm<VerifyOtpFormValues>({
+    resolver: zodResolver(verifyOtpSchema),
+    defaultValues: { otp: '' },
+  });
 
-  const handleOtpCellChange = (index: number, val: string) => {
-    if (val.length > 1) return;
-    const copied = [...otpText];
-    copied[index] = val;
-    setOtpText(copied);
-    
-    // Auto-focus next input
-    if (val && index < 5) {
-      const el = document.getElementById(`otp-cell-input-${index + 1}`);
-      if (el) el.focus();
+  function goTo(next: Panel) {
+    setPanel(next);
+    setAuthError('');
+  }
+
+  function describeError(error: unknown, fallback: string) {
+    return error instanceof ApiError ? error.message : fallback;
+  }
+
+  async function handleSignIn(values: LoginFormValues) {
+    setAuthError('');
+    try {
+      await login(values.email, values.password);
+      onAuthenticated();
+    } catch (error) {
+      setAuthError(describeError(error, 'Unable to sign in. Please try again.'));
     }
-  };
+  }
+
+  async function handleSignUp(values: SignupFormValues) {
+    setAuthError('');
+    try {
+      await signup(values);
+      onAuthenticated();
+    } catch (error) {
+      setAuthError(describeError(error, 'Unable to create your account. Please try again.'));
+    }
+  }
+
+  async function handleForgotPassword(values: ForgotPasswordFormValues) {
+    setAuthError('');
+    try {
+      const result = await forgotPassword(values.email);
+      setOtpEmail(values.email);
+      setOtpHint(result.devOtp ?? null);
+      goTo('otp');
+    } catch (error) {
+      setAuthError(describeError(error, 'Unable to send a reset code. Please try again.'));
+    }
+  }
+
+  async function handleVerifyOtp(values: VerifyOtpFormValues) {
+    setAuthError('');
+    try {
+      await verifyOtp(otpEmail, values.otp);
+      onAuthenticated();
+    } catch (error) {
+      setAuthError(describeError(error, 'That code is invalid or has expired.'));
+    }
+  }
 
   return (
-    <div className="min-h-[500px] flex flex-col items-center justify-center p-4 select-none">
-       {/* Small tab bar selection to easily preview ALL requested security screens */}
-       <div className="mb-6 bg-white border border-[#E5E7EB] rounded-[6px] p-1 flex space-x-1 text-xs text-[#6B7280]">
-         <button
-           id="btn-preview-signin"
-           onClick={() => { setPanel('signin'); setAuthError(''); }}
-           className={`px-3 py-1.5 rounded-[4px] font-semibold transition-colors cursor-pointer ${panel === 'signin' ? 'bg-[#2563EB] text-white' : 'hover:bg-slate-50 text-[#6B7280]'}`}
-         >
-           1. Sign In
-         </button>
-         <button
-           id="btn-preview-signup"
-           onClick={() => { setPanel('signup'); setAuthError(''); }}
-           className={`px-3 py-1.5 rounded-[4px] font-semibold transition-colors cursor-pointer ${panel === 'signup' ? 'bg-[#2563EB] text-white' : 'hover:bg-slate-50 text-[#6B7280]'}`}
-         >
-           2. Sign Up
-         </button>
-         <button
-           id="btn-preview-forgot"
-           onClick={() => { setPanel('forgot'); setAuthError(''); }}
-           className={`px-3 py-1.5 rounded-[4px] font-semibold transition-colors cursor-pointer ${panel === 'forgot' ? 'bg-[#2563EB] text-white' : 'hover:bg-slate-50 text-[#6B7280]'}`}
-         >
-           3. Forgot PW
-         </button>
-         <button
-           id="btn-preview-otp"
-           onClick={() => { setPanel('otp'); setAuthError(''); }}
-           className={`px-3 py-1.5 rounded-[4px] font-semibold transition-colors cursor-pointer ${panel === 'otp' ? 'bg-[#2563EB] text-white' : 'hover:bg-slate-50 text-[#6B7280]'}`}
-         >
-           4. OTP Screen
-         </button>
-       </div>
-
-       {/* Centered Auth Card Frame */}
-       <div 
-         id="auth-centered-box" 
-         className="bg-white border border-[#E5E7EB] rounded-[8px] max-w-sm w-full p-6 text-xs text-[#111827] relative"
-       >
-          <div className="absolute top-4 right-4 text-[10px] text-[#2563EB] font-mono tracking-widest font-bold">
-            SECURE PORT
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-background">
+      <div className="w-full max-w-sm bg-card border border-border rounded-lg p-6 text-sm text-foreground relative shadow-sm">
+        <div className="mb-5 text-center">
+          <div className="mx-auto h-11 w-11 bg-primary/10 border border-primary/15 rounded-md text-primary flex items-center justify-center">
+            <ShieldCheck className="h-5.5 w-5.5" />
           </div>
-
-          <div className="mb-5 text-center">
-            <div className="mx-auto h-11 w-11 bg-[#EFF6FF] border border-[#2563EB]/15 rounded-[6px] text-[#2563EB] flex items-center justify-center">
-              <ShieldCheck className="h-5.5 w-5.5" />
-            </div>
-            {panel === 'signin' && (
-              <>
-                <h3 className="text-16px font-bold text-[#111827] mt-3">Access Corporate workspace</h3>
-                <p className="text-[11px] text-[#6B7280] mt-1">Acme Global Division CRM Authentication Portal</p>
-              </>
-            )}
-            {panel === 'signup' && (
-              <>
-                <h3 className="text-16px font-bold text-[#111827] mt-3">Register Sales Tenant</h3>
-                <p className="text-[11px] text-[#6B7280] mt-1">Acquire operational database instances instantaneously</p>
-              </>
-            )}
-            {panel === 'forgot' && (
-              <>
-                <h3 className="text-16px font-bold text-[#111827] mt-3">Request OTP Password Reset</h3>
-                <p className="text-[11px] text-[#6B7280] mt-1">Dispatches recovery tokens to registered active personnel</p>
-              </>
-            )}
-            {panel === 'otp' && (
-              <>
-                <h3 className="text-16px font-bold text-[#111827] mt-3">Verification Multi-Factor OTP</h3>
-                <p className="text-[11px] text-[#6B7280] mt-1">Input the 6-digit corporate verification sequence</p>
-              </>
-            )}
-          </div>
-
-          {authError && (
-            <div className="mb-4 p-2.5 bg-red-50 border border-red-200 text-red-700 font-medium rounded-[4px] leading-tight">
-              {authError}
-            </div>
-          )}
-
-          {/* PANEL 1: SIGN IN */}
           {panel === 'signin' && (
-            <form onSubmit={handleSignIn} className="space-y-4">
-              <div>
-                <label className="block font-semibold text-[#111827] mb-1.5">Work Email</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#6B7280]">
-                    <Mail className="h-4 w-4" />
-                  </div>
-                  <input
-                    id="signin-email"
-                    type="email"
-                    required
-                    value={emailText}
-                    onChange={(e) => setEmailText(e.target.value)}
-                    className="w-full h-10 pl-9 pr-3 bg-white border border-[#E5E7EB] rounded-[6px] outline-none text-xs focus:border-[#2563EB]"
-                    placeholder="email@acme.corp"
-                  />
-                </div>
+            <>
+              <h1 className="text-lg font-bold mt-3">Sign in to Takimac CRM</h1>
+              <p className="text-xs text-muted-foreground mt-1">Welcome back — enter your work credentials.</p>
+            </>
+          )}
+          {panel === 'signup' && (
+            <>
+              <h1 className="text-lg font-bold mt-3">Create your workspace</h1>
+              <p className="text-xs text-muted-foreground mt-1">Set up a new company account in a few seconds.</p>
+            </>
+          )}
+          {panel === 'forgot' && (
+            <>
+              <h1 className="text-lg font-bold mt-3">Reset your password</h1>
+              <p className="text-xs text-muted-foreground mt-1">We'll send a one-time code to your work email.</p>
+            </>
+          )}
+          {panel === 'otp' && (
+            <>
+              <h1 className="text-lg font-bold mt-3">Enter verification code</h1>
+              <p className="text-xs text-muted-foreground mt-1">Check your email for a 6-digit code.</p>
+            </>
+          )}
+        </div>
+
+        {authError && (
+          <div role="alert" aria-live="assertive" className="mb-4 p-2.5 bg-destructive/10 border border-destructive/30 text-destructive font-medium rounded-md leading-tight text-xs">
+            {authError}
+          </div>
+        )}
+
+        {panel === 'signin' && (
+          <form onSubmit={signInForm.handleSubmit(handleSignIn)} className="space-y-4" noValidate>
+            <div>
+              <label htmlFor="signin-email" className="block font-semibold mb-1.5">Work email</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  id="signin-email"
+                  type="email"
+                  autoComplete="email"
+                  aria-invalid={!!signInForm.formState.errors.email}
+                  aria-describedby={signInForm.formState.errors.email ? 'signin-email-error' : undefined}
+                  {...signInForm.register('email')}
+                  className="w-full h-10 pl-9 pr-3 bg-background border border-border rounded-md outline-none text-sm focus-visible:ring-2 focus-visible:ring-ring"
+                  placeholder="you@company.com"
+                />
               </div>
+              {signInForm.formState.errors.email && (
+                <p id="signin-email-error" className="mt-1 text-xs text-destructive">{signInForm.formState.errors.email.message}</p>
+              )}
+            </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="font-semibold text-[#111827]">Security Password</label>
-                  <button
-                    type="button"
-                    onClick={() => { setPanel('forgot'); setAuthError(''); }}
-                    className="text-blue-600 hover:text-blue-800 font-semibold"
-                  >
-                    Forgot password?
-                  </button>
-                </div>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#6B7280]">
-                    <Lock className="h-4 w-4" />
-                  </div>
-                  <input
-                    id="signin-password"
-                    type="password"
-                    required
-                    value={passwordText}
-                    onChange={(e) => setPasswordText(e.target.value)}
-                    className="w-full h-10 pl-9 pr-3 bg-white border border-[#E5E7EB] rounded-[6px] outline-none text-xs focus:border-[#2563EB]"
-                  />
-                </div>
-              </div>
-
-              <button
-                id="btn-submit-signin"
-                type="submit"
-                className="w-full h-10 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold rounded-[6px] transition-colors cursor-pointer"
-              >
-                Authorize Session Access
-              </button>
-
-              <div className="text-center pt-2 border-t border-[#E5E7EB] text-[#6B7280]">
-                Don't have a registered tenant?{' '}
-                <button
-                  type="button"
-                  onClick={() => { setPanel('signup'); setAuthError(''); }}
-                  className="text-blue-600 hover:text-blue-800 font-semibold"
-                >
-                  Create tenant account
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label htmlFor="signin-password" className="font-semibold">Password</label>
+                <button type="button" onClick={() => goTo('forgot')} className="text-primary hover:underline font-semibold text-xs">
+                  Forgot password?
                 </button>
               </div>
-            </form>
-          )}
-
-          {/* PANEL 2: SIGN UP */}
-          {panel === 'signup' && (
-            <form onSubmit={handleSignUp} className="space-y-3">
-              <div>
-                <label className="block font-semibold text-[#111827] mb-1">Company Entity Name</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#6B7280]">
-                    <Building className="h-4 w-4" />
-                  </div>
-                  <input
-                    id="signup-company"
-                    type="text"
-                    required
-                    value={companyNameText}
-                    onChange={(e) => setCompanyNameText(e.target.value)}
-                    className="w-full h-10 pl-9 pr-3 bg-white border border-[#E5E7EB] rounded-[6px] outline-none text-xs focus:border-[#2563EB]"
-                    placeholder="e.g. Stark Industries Inc"
-                  />
-                </div>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  id="signin-password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  aria-invalid={!!signInForm.formState.errors.password}
+                  aria-describedby={signInForm.formState.errors.password ? 'signin-password-error' : undefined}
+                  {...signInForm.register('password')}
+                  className="w-full h-10 pl-9 pr-9 bg-background border border-border rounded-md outline-none text-sm focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
+              {signInForm.formState.errors.password && (
+                <p id="signin-password-error" className="mt-1 text-xs text-destructive">{signInForm.formState.errors.password.message}</p>
+              )}
+            </div>
 
-              <div>
-                <label className="block font-semibold text-[#111827] mb-1">Contact User Fullname</label>
+            <button
+              type="submit"
+              disabled={signInForm.formState.isSubmitting}
+              className="w-full h-10 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-md transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              {signInForm.formState.isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Sign in
+            </button>
+
+            <div className="text-center pt-2 border-t border-border text-muted-foreground text-xs">
+              Don't have a workspace yet?{' '}
+              <button type="button" onClick={() => goTo('signup')} className="text-primary hover:underline font-semibold">
+                Create one
+              </button>
+            </div>
+          </form>
+        )}
+
+        {panel === 'signup' && (
+          <form onSubmit={signUpForm.handleSubmit(handleSignUp)} className="space-y-3" noValidate>
+            <div>
+              <label htmlFor="signup-company" className="block font-semibold mb-1">Company name</label>
+              <div className="relative">
+                <Building className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  id="signup-company"
+                  type="text"
+                  autoComplete="organization"
+                  {...signUpForm.register('companyName')}
+                  className="w-full h-10 pl-9 pr-3 bg-background border border-border rounded-md outline-none text-sm focus-visible:ring-2 focus-visible:ring-ring"
+                  placeholder="Acme Inc."
+                />
+              </div>
+              {signUpForm.formState.errors.companyName && (
+                <p className="mt-1 text-xs text-destructive">{signUpForm.formState.errors.companyName.message}</p>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor="signup-fullname" className="block font-semibold mb-1">Full name</label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <input
                   id="signup-fullname"
                   type="text"
-                  required
-                  value={fullNameText}
-                  onChange={(e) => setFullNameText(e.target.value)}
-                  className="w-full h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] outline-none text-xs focus:border-[#2563EB]"
-                  placeholder="e.g. Miriam Vance"
+                  autoComplete="name"
+                  {...signUpForm.register('fullName')}
+                  className="w-full h-10 pl-9 pr-3 bg-background border border-border rounded-md outline-none text-sm focus-visible:ring-2 focus-visible:ring-ring"
+                  placeholder="Jane Smith"
                 />
               </div>
+              {signUpForm.formState.errors.fullName && (
+                <p className="mt-1 text-xs text-destructive">{signUpForm.formState.errors.fullName.message}</p>
+              )}
+            </div>
 
-              <div>
-                <label className="block font-semibold text-[#111827] mb-1">Work Email Required</label>
+            <div>
+              <label htmlFor="signup-email" className="block font-semibold mb-1">Work email</label>
+              <input
+                id="signup-email"
+                type="email"
+                autoComplete="email"
+                {...signUpForm.register('email')}
+                className="w-full h-10 px-3 bg-background border border-border rounded-md outline-none text-sm focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="you@company.com"
+              />
+              {signUpForm.formState.errors.email && (
+                <p className="mt-1 text-xs text-destructive">{signUpForm.formState.errors.email.message}</p>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor="signup-password" className="block font-semibold mb-1">Password</label>
+              <div className="relative">
                 <input
-                  id="signup-email"
-                  type="email"
-                  required
-                  value={emailText}
-                  onChange={(e) => setEmailText(e.target.value)}
-                  className="w-full h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] outline-none text-xs focus:border-[#2563EB]"
-                  placeholder="email@company.com"
+                  id="signup-password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  {...signUpForm.register('password')}
+                  className="w-full h-10 px-3 pr-9 bg-background border border-border rounded-md outline-none text-sm focus-visible:ring-2 focus-visible:ring-ring"
                 />
-              </div>
-
-              <button
-                id="btn-submit-signup"
-                type="submit"
-                className="w-full h-10 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold rounded-[6px] transition-colors mt-3 cursor-pointer"
-              >
-                Deploy Database Tenant
-              </button>
-
-              <div className="text-center pt-2 border-t border-[#E5E7EB] text-[#6B7280]">
-                Already verified?{' '}
                 <button
                   type="button"
-                  onClick={() => { setPanel('signin'); setAuthError(''); }}
-                  className="text-blue-600 hover:text-blue-800 font-semibold"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
-                  Authorized Login
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-            </form>
-          )}
+              {signUpForm.formState.errors.password && (
+                <p className="mt-1 text-xs text-destructive">{signUpForm.formState.errors.password.message}</p>
+              )}
+            </div>
 
-          {/* PANEL 3: FORGOT PASSWORD */}
-          {panel === 'forgot' && (
-            <form onSubmit={handleForgotPassword} className="space-y-4">
-              <p className="text-[11px] text-[#6B7280] leading-normal">
-                An active OTP recovery token code will be generated to reset registered parameters. Inform operations lead if your address bounces.
-              </p>
+            <button
+              type="submit"
+              disabled={signUpForm.formState.isSubmitting}
+              className="w-full h-10 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-md transition-colors mt-2 flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              {signUpForm.formState.isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Create workspace
+            </button>
 
-              <div>
-                <label className="block font-semibold text-[#111827] mb-1.5">Registered Work Email</label>
-                <input
-                  id="forgot-email"
-                  type="email"
-                  required
-                  value={emailText}
-                  onChange={(e) => setEmailText(e.target.value)}
-                  className="w-full h-10 px-3 bg-white border border-[#E5E7EB] rounded-[6px] outline-none text-xs focus:border-[#2563EB]"
-                  placeholder="name@agency.corp"
-                />
-              </div>
-
-              <button
-                id="btn-submit-forgot"
-                type="submit"
-                className="w-full h-10 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold rounded-[6px] transition-colors cursor-pointer"
-              >
-                Request OTP Code File
+            <div className="text-center pt-2 border-t border-border text-muted-foreground text-xs">
+              Already have an account?{' '}
+              <button type="button" onClick={() => goTo('signin')} className="text-primary hover:underline font-semibold">
+                Sign in
               </button>
+            </div>
+          </form>
+        )}
 
-              <button
-                type="button"
-                onClick={() => { setPanel('signin'); setAuthError(''); }}
-                className="w-full h-10 border border-[#E5E7EB] text-[#111827] bg-white rounded-[6px] flex items-center justify-center gap-1.5 hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Return to Login
-              </button>
-            </form>
-          )}
+        {panel === 'forgot' && (
+          <form onSubmit={forgotForm.handleSubmit(handleForgotPassword)} className="space-y-4" noValidate>
+            <p className="text-xs text-muted-foreground leading-normal">
+              Enter your work email and we'll send a 6-digit code to reset your password.
+            </p>
+            <div>
+              <label htmlFor="forgot-email" className="block font-semibold mb-1.5">Work email</label>
+              <input
+                id="forgot-email"
+                type="email"
+                autoComplete="email"
+                {...forgotForm.register('email')}
+                className="w-full h-10 px-3 bg-background border border-border rounded-md outline-none text-sm focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="you@company.com"
+              />
+              {forgotForm.formState.errors.email && (
+                <p className="mt-1 text-xs text-destructive">{forgotForm.formState.errors.email.message}</p>
+              )}
+            </div>
 
-          {/* PANEL 4: OTP MULTIFACTOR VERIFICATION */}
-          {panel === 'otp' && (
-            <form onSubmit={handleVerifyOTP} className="space-y-4">
-              <p className="text-[11px] text-[#6B7280] leading-normal text-center">
-                Dispatched code index file to <strong>{emailText}</strong>.<br />
-                Expires in <span className="font-mono text-blue-600 font-bold">04:59 minutes</span>.
-              </p>
+            <button
+              type="submit"
+              disabled={forgotForm.formState.isSubmitting}
+              className="w-full h-10 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-md transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              {forgotForm.formState.isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Send reset code
+            </button>
 
-              {/* Number boxes */}
-              <div className="flex justify-between items-center gap-1.5 py-2">
-                {otpText.map((char, index) => (
-                  <input
-                    key={index}
-                    id={`otp-cell-input-${index}`}
-                    type="text"
-                    required
-                    value={char}
-                    onChange={(e) => handleOtpCellChange(index, e.target.value)}
-                    className="w-11 h-11 border border-[#E5E7EB] text-center font-bold text-16px text-slate-900 bg-[#F5F6F8] rounded-[6px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-blue-200"
-                  />
-                ))}
-              </div>
+            <button
+              type="button"
+              onClick={() => goTo('signin')}
+              className="w-full h-10 border border-border bg-background rounded-md flex items-center justify-center gap-1.5 hover:bg-muted transition-colors"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back to sign in
+            </button>
+          </form>
+        )}
 
-              <button
-                id="btn-submit-otp"
-                type="submit"
-                className="w-full h-10 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold rounded-[6px] transition-colors cursor-pointer"
-              >
-                Authorize OTP verification
-              </button>
+        {panel === 'otp' && (
+          <form onSubmit={otpForm.handleSubmit(handleVerifyOtp)} className="space-y-4" noValidate>
+            <p className="text-xs text-muted-foreground leading-normal text-center">
+              Enter the 6-digit code sent to <strong>{otpEmail}</strong>.
+            </p>
+            {otpHint && (
+              <p className="text-xs text-center text-primary font-mono">Dev-only preview code: {otpHint}</p>
+            )}
 
-              <div className="flex items-center justify-between pt-2 text-[#6B7280] text-[10px]">
-                <span>No code received?</span>
-                <button
-                  type="button"
-                  onClick={() => alert('Another security token was queued for dispatch.')}
-                  className="text-blue-600 hover:text-[#1d4ed8] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer"
-                >
-                  <RefreshCw className="h-3 w-3 animate-spin" />
-                  Request Resend
-                </button>
-              </div>
-            </form>
-          )}
+            <div>
+              <label htmlFor="otp-code" className="sr-only">Verification code</label>
+              <input
+                id="otp-code"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                autoComplete="one-time-code"
+                {...otpForm.register('otp')}
+                className="w-full h-12 text-center tracking-[0.5em] font-bold text-lg bg-muted border border-border rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="000000"
+              />
+              {otpForm.formState.errors.otp && (
+                <p className="mt-1 text-xs text-destructive text-center">{otpForm.formState.errors.otp.message}</p>
+              )}
+            </div>
 
-       </div>
+            <button
+              type="submit"
+              disabled={otpForm.formState.isSubmitting}
+              className="w-full h-10 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-md transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              {otpForm.formState.isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Verify code
+            </button>
 
-       {/* Exit Preview options */}
-       <div className="mt-4 text-center">
-         <button
-           id="btn-exit-auth-preview"
-           onClick={onExitAuthPreview}
-           className="text-xs text-[#6B7280] hover:text-[#111827] flex items-center gap-1 text-center font-bold underline"
-         >
-           Exit security previews, restore core workspace dashboard
-         </button>
-       </div>
+            <button
+              type="button"
+              onClick={() => goTo('signin')}
+              className="w-full text-center text-muted-foreground hover:text-foreground text-xs font-semibold"
+            >
+              Back to sign in
+            </button>
+          </form>
+        )}
+      </div>
     </div>
   );
 }
